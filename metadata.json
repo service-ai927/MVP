@@ -1,0 +1,7 @@
+{
+  "name": "Outreach Pipeline MVP",
+  "description": "AI-assisted outreach and reply management inbox with classification, human review, and draft editing.",
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

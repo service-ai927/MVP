@@ -1,0 +1,492 @@
+{
+  "_about": "X(旧Twitter)のDM受信箱を、現行の inbox-agent が判定した実例を匿名化したもの。相手は 相手A〜相手L、固有名詞(人名・社名・製品名・URL・メール)は除去または一般語に置換。本文は要旨を残して短縮。時刻は実際の受信時刻(JST)。",
+  "_schema": {
+    "counterpart": "相手: id / handle(匿名) / profile_url(匿名) / memo(こちらが把握している文脈)",
+    "medium": "媒体: type / account(送信側の名義)",
+    "thread": "スレッド: id / last_incoming_at / status(open|handled|held)",
+    "messages": "メッセージ: 古い順。from は counterpart|me。text / at",
+    "classification": "分類: action(auto|escalate|skip) / category / reason / decided_by(rule|llm|human) / rule_hit(機械ルール名)",
+    "draft": "下書き: generated(LLM生成文) / edited(人が直した最終文。null=未送信) / gate(合格|却下理由) / send_status(sent|held_for_human|not_needed|failed)"
+  },
+  "threads": [
+    {
+      "counterpart": {
+        "id": "相手A",
+        "handle": "@userA",
+        "profile_url": "https://x.com/userA",
+        "memo": "個人開発者。以前SNSの書き方を相談された"
+      },
+      "medium": {
+        "type": "x",
+        "account": "Lily"
+      },
+      "thread": {
+        "id": "x-A",
+        "last_incoming_at": "2026-09-07T17:39:00+09:00",
+        "status": "handled"
+      },
+      "messages": [
+        {
+          "from": "counterpart",
+          "text": "投稿の1行目を変えてみたら反応が少し変わりました。",
+          "at": "2026-09-07T16:50:00+09:00"
+        },
+        {
+          "from": "me",
+          "text": "1行目はいくつか書いてみて、手が止まった感触があったものを残していくと精度が上がります。",
+          "at": "2026-09-07T17:10:00+09:00"
+        },
+        {
+          "from": "counterpart",
+          "text": "助言、ありがとうございます✨",
+          "at": "2026-09-07T17:39:00+09:00"
+        }
+      ],
+      "classification": {
+        "action": "auto",
+        "category": "お礼への返信",
+        "reason": "助言への軽いお礼のみで日程・金額なし。相槌で十分",
+        "decided_by": "llm",
+        "rule_hit": null
+      },
+      "draft": {
+        "generated": "役に立てたら良かったです。型を変えてみて反応がどう変わるか、また教えてもらえると僕も嬉しいです。",
+        "edited": "役に立てたら良かったです。型を変えてみて反応がどう変わるか、また教えてもらえると僕も嬉しいです。",
+        "gate": "合格",
+        "send_status": "sent"
+      }
+    },
+    {
+      "counterpart": {
+        "id": "相手B",
+        "handle": "@userB",
+        "profile_url": "https://x.com/userB",
+        "memo": "ブラウザゲームを個人開発中。初回の相談DM"
+      },
+      "medium": {
+        "type": "x",
+        "account": "Lily"
+      },
+      "thread": {
+        "id": "x-B",
+        "last_incoming_at": "2026-09-08T23:40:00+09:00",
+        "status": "handled"
+      },
+      "messages": [
+        {
+          "from": "counterpart",
+          "text": "遅くにすみません。マーケティングの投稿を見て相談したくDMしました。ブラウザ版のゲームを公開しようと考えているのですが、公開しても誰にも気づかれず遊ばれない気がしています。何から手をつければいいでしょうか。",
+          "at": "2026-09-08T23:40:00+09:00"
+        }
+      ],
+      "classification": {
+        "action": "auto",
+        "category": "マーケ相談",
+        "reason": "日程・金額なし。実行可能な助言だけで返信できる",
+        "decided_by": "llm",
+        "rule_hit": null
+      },
+      "draft": {
+        "generated": "ブラウザゲームの新規公開、認知づくりは本当に大事ですね。今のうちにできることとしては、開発の様子をX等で定期的に発信して期待感を作っておくこと、公開後すぐ遊んでもらえるよう事前登録できるページを用意しておくことがおすすめです。同じジャンルの配信者やコミュニティに早めに繋がっておくのも効きます。",
+        "edited": "(同文)",
+        "gate": "合格",
+        "send_status": "sent"
+      }
+    },
+    {
+      "counterpart": {
+        "id": "相手C",
+        "handle": "@userC",
+        "profile_url": "https://x.com/userC",
+        "memo": "相手Bと同一の相談の続き。Steam版の質問"
+      },
+      "medium": {
+        "type": "x",
+        "account": "Lily"
+      },
+      "thread": {
+        "id": "x-C",
+        "last_incoming_at": "2026-09-09T14:33:00+09:00",
+        "status": "handled"
+      },
+      "messages": [
+        {
+          "from": "counterpart",
+          "text": "ご丁寧にありがとうございます。参考に進めてみます。もしよろしければ、Steam版だと特にこう、というのはありますか？",
+          "at": "2026-09-09T14:33:00+09:00"
+        }
+      ],
+      "classification": {
+        "action": "auto",
+        "category": "マーケ相談(続き)",
+        "reason": "継続中の相談。Steam特有の質問に答えるだけ",
+        "decided_by": "llm",
+        "rule_hit": null
+      },
+      "draft": {
+        "generated": "Steamなら一番大事なのはウィッシュリスト数です。ストアページを早めに作って登録を集めておくと、発売時にストアのアルゴリズムに乗りやすくなります。体験版イベントに合わせて出すのも効果的です。",
+        "edited": "(同文)",
+        "gate": "合格",
+        "send_status": "sent"
+      }
+    },
+    {
+      "counterpart": {
+        "id": "相手D",
+        "handle": "@userD",
+        "profile_url": "https://x.com/userD",
+        "memo": "受託の打診が進行中。前回は日程変更を依頼した"
+      },
+      "medium": {
+        "type": "x",
+        "account": "Lily"
+      },
+      "thread": {
+        "id": "x-D",
+        "last_incoming_at": "2026-09-11T09:06:00+09:00",
+        "status": "held"
+      },
+      "messages": [
+        {
+          "from": "me",
+          "text": "打ち合わせの日程、一度ずらさせてください。",
+          "at": "2026-09-10T22:10:00+09:00"
+        },
+        {
+          "from": "counterpart",
+          "text": "9/14（月）13〜17時、9/15（火）15〜17時でご都合いかがでしょう？",
+          "at": "2026-09-11T09:06:00+09:00"
+        }
+      ],
+      "classification": {
+        "action": "escalate",
+        "category": "日程・MTGの日時",
+        "reason": "機械ルール: 日程・MTGの日時（例外なく本人判断）",
+        "decided_by": "rule",
+        "rule_hit": "日程・MTGの日時"
+      },
+      "draft": {
+        "generated": null,
+        "edited": "(例) 9/15（火）15:00でお願いします。リンクは当日朝までに送ります。",
+        "gate": "本人承認のため日程・URLを許可",
+        "send_status": "sent"
+      }
+    },
+    {
+      "counterpart": {
+        "id": "相手E",
+        "handle": "@userE",
+        "profile_url": "https://x.com/userE",
+        "memo": "成果報酬で集客導線を任せたいという企業側担当"
+      },
+      "medium": {
+        "type": "x",
+        "account": "Lily"
+      },
+      "thread": {
+        "id": "x-E",
+        "last_incoming_at": "2026-09-05T14:25:00+09:00",
+        "status": "held"
+      },
+      "messages": [
+        {
+          "from": "me",
+          "text": "①成果の定義 ②固定か成果報酬か ③任せたい範囲 を教えてください。",
+          "at": "2026-09-05T11:30:00+09:00"
+        },
+        {
+          "from": "counterpart",
+          "text": "1、成約となります。1件あたり◯万円お渡しします。2、固定額です。3、導線から運用までお任せし、そこからの成約はすべて成果報酬としてお支払いします。",
+          "at": "2026-09-05T14:25:00+09:00"
+        }
+      ],
+      "classification": {
+        "action": "escalate",
+        "category": "金額・条件・契約",
+        "reason": "機械ルール: 金額・条件・契約",
+        "decided_by": "rule",
+        "rule_hit": "金額・条件・契約"
+      },
+      "draft": {
+        "generated": null,
+        "edited": null,
+        "gate": "-",
+        "send_status": "held_for_human"
+      }
+    },
+    {
+      "counterpart": {
+        "id": "相手F",
+        "handle": "@userF",
+        "profile_url": "https://x.com/userF",
+        "memo": "個人開発者。雑談から実績を聞いてきた"
+      },
+      "medium": {
+        "type": "x",
+        "account": "Lily"
+      },
+      "thread": {
+        "id": "x-F",
+        "last_incoming_at": "2026-09-13T20:10:00+09:00",
+        "status": "held"
+      },
+      "messages": [
+        {
+          "from": "counterpart",
+          "text": "(要旨) 詳しい解説ありがとうございます。ちなみにLilyさんのアプリってどのくらいダウンロードされてるんですか？売上も差し支えなければ…",
+          "at": "2026-09-13T20:10:00+09:00"
+        }
+      ],
+      "classification": {
+        "action": "escalate",
+        "category": "実績の数字を聞かれている",
+        "reason": "機械ルール: 実績の数字（DL数・売上）は機械が答えない",
+        "decided_by": "rule",
+        "rule_hit": "実績の数字を聞かれている"
+      },
+      "draft": {
+        "generated": null,
+        "edited": null,
+        "gate": "-",
+        "send_status": "held_for_human"
+      }
+    },
+    {
+      "counterpart": {
+        "id": "相手G",
+        "handle": "@userG",
+        "profile_url": "https://x.com/userG",
+        "memo": "こちらから協業を提案していたSaaS運営者"
+      },
+      "medium": {
+        "type": "x",
+        "account": "Lily"
+      },
+      "thread": {
+        "id": "x-G",
+        "last_incoming_at": "2026-09-08T10:20:00+09:00",
+        "status": "held"
+      },
+      "messages": [
+        {
+          "from": "counterpart",
+          "text": "ご相談いただいていた件、いったん見送らせてください。いま登録後の体験を作り直している最中で、条件が動いている時期にお願いすると迷惑をかけそうなので。",
+          "at": "2026-09-08T10:20:00+09:00"
+        }
+      ],
+      "classification": {
+        "action": "escalate",
+        "category": "断り・クレーム・こじれ",
+        "reason": "機械ルール: 断り。返し方は本人が決める",
+        "decided_by": "rule",
+        "rule_hit": "断り・クレーム・こじれ"
+      },
+      "draft": {
+        "generated": null,
+        "edited": "(例) 了解しました、率直に教えてくださってありがとうございます。状況が変わるタイミングがあればまた声をかけてください。",
+        "gate": "合格",
+        "send_status": "sent"
+      }
+    },
+    {
+      "counterpart": {
+        "id": "相手H",
+        "handle": "@userH",
+        "profile_url": "https://x.com/userH",
+        "memo": "研究者向けツールの開発者。こちらからマーケ支援を提案していた"
+      },
+      "medium": {
+        "type": "x",
+        "account": "Lily"
+      },
+      "thread": {
+        "id": "x-H",
+        "last_incoming_at": "2026-09-16T11:05:00+09:00",
+        "status": "held"
+      },
+      "messages": [
+        {
+          "from": "counterpart",
+          "text": "ご連絡ありがとうございます。リリースを見ていただき、同期設計について触れていただけて嬉しいです。現状は英語圏向けに小さく施策を回している段階で、マーケは外部の方と一つ動かしている最中です。そのため今すぐ体制を広げる予定はありません。",
+          "at": "2026-09-16T11:05:00+09:00"
+        }
+      ],
+      "classification": {
+        "action": "escalate",
+        "category": "知り合い・元同僚からの連絡",
+        "reason": "機械ルール: 『同期』に一致 ← 誤判定。『同期設計』の技術用語に当たった",
+        "decided_by": "rule",
+        "rule_hit": "知り合い・元同僚からの連絡"
+      },
+      "draft": {
+        "generated": null,
+        "edited": null,
+        "gate": "-",
+        "send_status": "held_for_human"
+      },
+      "_note": "誤判定の実例。正しくは『やんわり辞退』でauto可。正規表現の機械ルールは安全側に倒れるが、こういう誤爆で本人の手数が増える"
+    },
+    {
+      "counterpart": {
+        "id": "相手I",
+        "handle": "@userI",
+        "profile_url": "https://x.com/userI",
+        "memo": "初見。業者"
+      },
+      "medium": {
+        "type": "x",
+        "account": "Lily"
+      },
+      "thread": {
+        "id": "x-I",
+        "last_incoming_at": "2026-09-10T12:00:00+09:00",
+        "status": "handled"
+      },
+      "messages": [
+        {
+          "from": "counterpart",
+          "text": "━━━━━━━━━━\n【期間限定キャンペーン】SNS運用代行が今だけ初月無料お試し！\n▼登録はこちら\n(URL)\n━━━━━━━━━━",
+          "at": "2026-09-10T12:00:00+09:00"
+        }
+      ],
+      "classification": {
+        "action": "skip",
+        "category": "業者の一斉営業",
+        "reason": "返信不要と判定: 一斉配信の定型（罫線・▼・キャンペーン）",
+        "decided_by": "rule",
+        "rule_hit": "業者の一斉営業"
+      },
+      "draft": {
+        "generated": null,
+        "edited": null,
+        "gate": "-",
+        "send_status": "not_needed"
+      }
+    },
+    {
+      "counterpart": {
+        "id": "相手J",
+        "handle": "@userJ",
+        "profile_url": "https://x.com/userJ",
+        "memo": "初見"
+      },
+      "medium": {
+        "type": "x",
+        "account": "Lily"
+      },
+      "thread": {
+        "id": "x-J",
+        "last_incoming_at": "2026-09-12T08:30:00+09:00",
+        "status": "handled"
+      },
+      "messages": [
+        {
+          "from": "counterpart",
+          "text": "https://lin.ee/xxxxxxx",
+          "at": "2026-09-12T08:30:00+09:00"
+        }
+      ],
+      "classification": {
+        "action": "skip",
+        "category": "リンクだけのDM",
+        "reason": "返信不要と判定: 他サービスへの誘導リンクのみ",
+        "decided_by": "rule",
+        "rule_hit": "他サービスへの誘導だけ"
+      },
+      "draft": {
+        "generated": null,
+        "edited": null,
+        "gate": "-",
+        "send_status": "not_needed"
+      }
+    },
+    {
+      "counterpart": {
+        "id": "相手K",
+        "handle": "@userK",
+        "profile_url": "https://x.com/userK",
+        "memo": "個人開発者。事前登録LPをこちらが作る話が進行中"
+      },
+      "medium": {
+        "type": "x",
+        "account": "Lily"
+      },
+      "thread": {
+        "id": "x-K",
+        "last_incoming_at": "2026-08-28T13:54:00+09:00",
+        "status": "handled"
+      },
+      "messages": [
+        {
+          "from": "counterpart",
+          "text": "課金画面のスクショ送ります。3つ以上選ぶ場合は別画面に誘導する仕組みにしています。",
+          "at": "2026-08-28T13:54:00+09:00"
+        }
+      ],
+      "classification": {
+        "action": "auto",
+        "category": "進捗報告",
+        "reason": "スクショ受領と仕様共有への相槌。約束事なし",
+        "decided_by": "llm",
+        "rule_hit": null
+      },
+      "draft": {
+        "generated": "課金画面ありがとうございます。雰囲気も仕様も把握しました。事前登録の段階では価格には触れない方針のまま進めます。節目のお知らせを送る前提でフォームを作るので、LPの初稿と合わせて形をお送りします。",
+        "edited": "(同文・当時はゲート無しで送信)",
+        "gate": "【現在なら却下】成果物を約束している（『LPの初稿をお送りします』）",
+        "send_status": "sent"
+      },
+      "_note": "悪い例。LLMが『いつ何を作るか』を勝手に約束した。この事故のあとに文面ゲート（成果物の約束・日時・金額・URL・数字を機械で弾く）を追加した"
+    },
+    {
+      "counterpart": {
+        "id": "相手L",
+        "handle": "@userL",
+        "profile_url": "https://x.com/userL",
+        "memo": "ゲーム開発者。動画の相談"
+      },
+      "medium": {
+        "type": "x",
+        "account": "Lily"
+      },
+      "thread": {
+        "id": "x-L",
+        "last_incoming_at": "2026-09-14T21:02:00+09:00",
+        "status": "handled"
+      },
+      "messages": [
+        {
+          "from": "counterpart",
+          "text": "こんばんは、遅くなってすみません。先日投稿した動画です。『プレイ中の一番おかしい30秒』が自分のゲームのどこか分からなくて💦",
+          "at": "2026-09-14T21:02:00+09:00"
+        }
+      ],
+      "classification": {
+        "action": "auto",
+        "category": "動画相談",
+        "reason": "動画の感想・アドバイス依頼。日程・金額なし",
+        "decided_by": "llm",
+        "rule_hit": null
+      },
+      "draft": {
+        "generated": "動画共有ありがとうございます！『一番おかしい30秒』は、キャラの動きや効果音が想定外になった瞬間や、操作ミスが一番強く出てる場面だと選びやすいと思います。",
+        "edited": "(同文)",
+        "gate": "合格",
+        "send_status": "sent"
+      },
+      "_note": "例外の実例。同じ受信メッセージが2回の巡回で2回判定され、下書きが2本できた（動画の埋め込みが本文先頭に『00:00 / 00:19』を足して別メッセージに見えた）。『同一メッセージの再判定を止める』が必要"
+    }
+  ],
+  "_unmeasured_case": {
+    "counterpart": {
+      "id": "相手M"
+    },
+    "classification": {
+      "action": "escalate",
+      "category": "判定不能",
+      "reason": "LLM失敗: 利用上限で応答なし",
+      "decided_by": "rule"
+    },
+    "_note": "8/28〜9/17の251判定のうち43件がこれ。LLMが落ちると全部『本人判断』に落ちる設計＝安全だが本人の手数がそのまま増える。MVPでは『LLM不通時は下書きなしで一覧に積む』で十分"
+  }
+}

@@ -9,6 +9,7 @@ import {
   hasOriginalClassification,
   isHumanReviewed,
   isCorrectedClassification,
+  computeCorrectionBreakdown,
 } from "../src/correction-rate.mjs";
 
 function aiThread(overrides = {}) {
@@ -38,6 +39,16 @@ function aiThread(overrides = {}) {
 
 function rateOf(...threads) {
   return computeCorrectionRate(threads);
+}
+
+/** Builds the reviewEvidence audit split: [eligible, corrected] per bucket. */
+function evidence(classificationUpdate = [0, 0], completion = [0, 0], unspecified = [0, 0]) {
+  const bucket = ([eligibleItems, correctedItems]) => ({ eligibleItems, correctedItems });
+  return {
+    classificationUpdate: bucket(classificationUpdate),
+    completion: bucket(completion),
+    unspecified: bucket(unspecified),
+  };
 }
 
 test("reviewed item whose classification is unchanged is eligible but not corrected", () => {
@@ -79,7 +90,12 @@ test("final classification that differs from the original AI classification coun
   assert.equal(thread.classification.decided_by, "human");
 
   const rate = rateOf(thread);
-  assert.deepEqual(rate, { eligibleReviewedItems: 1, correctedItems: 1, ratePercent: 100 });
+  assert.deepEqual(rate, {
+    eligibleReviewedItems: 1,
+    correctedItems: 1,
+    ratePercent: 100,
+    reviewEvidence: evidence([1, 1]),
+  });
 });
 
 test("repeated human edits contribute at most one correction", () => {
@@ -89,13 +105,18 @@ test("repeated human edits contribute at most one correction", () => {
   applyHumanClassification(thread, { action: "escalate", category: "日程・MTGの日時", reason: "1回目" });
   applyHumanClassification(thread, { action: "skip", category: "スパム", reason: "2回目" });
   applyHumanClassification(thread, {
-    action: "auto",
+    action: "escalate",
     category: "カジュアルな質問",
     reason: "3回目",
   });
 
   const rate = rateOf(thread);
-  assert.deepEqual(rate, { eligibleReviewedItems: 1, correctedItems: 1, ratePercent: 100 });
+  assert.deepEqual(rate, {
+    eligibleReviewedItems: 1,
+    correctedItems: 1,
+    ratePercent: 100,
+    reviewEvidence: evidence([1, 1]),
+  });
 
   // Editing back to the original AI classification removes the correction.
   applyHumanClassification(thread, {
@@ -104,7 +125,12 @@ test("repeated human edits contribute at most one correction", () => {
     reason: "元に戻す",
   });
   const reverted = rateOf(thread);
-  assert.deepEqual(reverted, { eligibleReviewedItems: 1, correctedItems: 0, ratePercent: 0 });
+  assert.deepEqual(reverted, {
+    eligibleReviewedItems: 1,
+    correctedItems: 0,
+    ratePercent: 0,
+    reviewEvidence: evidence([1, 0]),
+  });
 });
 
 test("re-running AI triage never overwrites the preserved original classification", () => {
@@ -128,7 +154,12 @@ test("re-running AI triage never overwrites the preserved original classificatio
 
   assert.equal(thread.original_classification.action, "auto");
   assert.equal(thread.original_classification.category, "お礼への返信");
-  assert.deepEqual(rateOf(thread), { eligibleReviewedItems: 1, correctedItems: 1, ratePercent: 100 });
+  assert.deepEqual(rateOf(thread), {
+    eligibleReviewedItems: 1,
+    correctedItems: 1,
+    ratePercent: 100,
+    reviewEvidence: evidence([1, 1]),
+  });
 });
 
 test("item with no original AI classification is excluded instead of counted as uncorrected", () => {
@@ -152,7 +183,12 @@ test("item with no original AI classification is excluded instead of counted as 
   assert.equal(isCorrectedClassification(thread), false);
 
   const rate = rateOf(thread);
-  assert.deepEqual(rate, { eligibleReviewedItems: 0, correctedItems: 0, ratePercent: null });
+  assert.deepEqual(rate, {
+    eligibleReviewedItems: 0,
+    correctedItems: 0,
+    ratePercent: null,
+    reviewEvidence: evidence(),
+  });
 });
 
 test("item that has not completed human review is excluded", () => {
@@ -163,12 +199,22 @@ test("item that has not completed human review is excluded", () => {
   assert.equal(isHumanReviewed(thread), false);
 
   const rate = rateOf(thread);
-  assert.deepEqual(rate, { eligibleReviewedItems: 0, correctedItems: 0, ratePercent: null });
+  assert.deepEqual(rate, {
+    eligibleReviewedItems: 0,
+    correctedItems: 0,
+    ratePercent: null,
+    reviewEvidence: evidence(),
+  });
 });
 
 test("summary with zero eligible items never reports NaN or Infinity", () => {
   const empty = computeCorrectionRate([]);
-  assert.deepEqual(empty, { eligibleReviewedItems: 0, correctedItems: 0, ratePercent: null });
+  assert.deepEqual(empty, {
+    eligibleReviewedItems: 0,
+    correctedItems: 0,
+    ratePercent: null,
+    reviewEvidence: evidence(),
+  });
 
   const noEligible = rateOf(aiThread(), {
     classification: { action: "escalate", category: "その他・不明", reason: "", decided_by: "human" },
@@ -183,6 +229,7 @@ test("summary with zero eligible items never reports NaN or Infinity", () => {
     eligibleReviewedItems: 0,
     correctedItems: 0,
     ratePercent: null,
+    reviewEvidence: evidence(),
   });
 });
 
@@ -208,6 +255,7 @@ test("mixed set counts only eligible human-reviewed items", () => {
     eligibleReviewedItems: 2,
     correctedItems: 1,
     ratePercent: 50,
+    reviewEvidence: evidence([1, 1], [0, 0], [1, 0]),
   });
 });
 
@@ -227,7 +275,12 @@ test("saving, reloading, and re-importing keeps the original classification and 
   assert.equal(reloaded.original_classification.action, "auto");
   assert.equal(reloaded.classification.action, "escalate");
   assert.equal(isHumanReviewed(reloaded), true);
-  assert.deepEqual(rateOf(reloaded), { eligibleReviewedItems: 1, correctedItems: 1, ratePercent: 100 });
+  assert.deepEqual(rateOf(reloaded), {
+    eligibleReviewedItems: 1,
+    correctedItems: 1,
+    ratePercent: 100,
+    reviewEvidence: evidence([1, 1]),
+  });
 
   // Import of a fresh AI-classified record derives the original (sample format).
   const importedFresh = prepareImportedThread(aiThread());
@@ -260,6 +313,7 @@ test("saving, reloading, and re-importing keeps the original classification and 
     eligibleReviewedItems: 0,
     correctedItems: 0,
     ratePercent: null,
+    reviewEvidence: evidence(),
   });
 });
 
@@ -270,4 +324,104 @@ test("marking human review is idempotent", () => {
   const firstStamp = thread.human_reviewed_at;
   markHumanReviewed(thread);
   assert.equal(thread.human_reviewed_at, firstStamp);
+});
+
+test("review evidence splits the headline denominator by how review was completed", () => {
+  const edited = aiThread();
+  ensureOriginalClassification(edited);
+  applyHumanClassification(edited, { action: "escalate", category: "日程・MTGの日時", reason: "修正" });
+
+  const approved = aiThread({ thread: { id: "x-B", status: "handled" } });
+  ensureOriginalClassification(approved);
+  markHumanReviewed(approved, "approve"); // draft approval evidences item review
+
+  const legacy = aiThread({ thread: { id: "x-C", status: "handled" } });
+  ensureOriginalClassification(legacy);
+  markHumanReviewed(legacy); // records from before the audit field existed
+
+  const rate = rateOf(edited, approved, legacy);
+  assert.equal(rate.eligibleReviewedItems, 3);
+  assert.equal(rate.correctedItems, 1);
+  assert.equal(rate.ratePercent, 33.3);
+  assert.deepEqual(rate.reviewEvidence, evidence([1, 1], [1, 0], [1, 0]));
+  // The audit split always sums back to the headline denominator/numerator.
+  const buckets = Object.values(rate.reviewEvidence);
+  assert.equal(
+    buckets.reduce((sum, b) => sum + b.eligibleItems, 0),
+    rate.eligibleReviewedItems
+  );
+  assert.equal(
+    buckets.reduce((sum, b) => sum + b.correctedItems, 0),
+    rate.correctedItems
+  );
+});
+
+test("review evidence only upgrades from completion to classification review", () => {
+  const thread = aiThread();
+  ensureOriginalClassification(thread);
+
+  markHumanReviewed(thread, "approve");
+  assert.equal(thread.human_reviewed_via, "approve");
+
+  // A later classification edit records the stronger evidence source.
+  markHumanReviewed(thread, "update_classification");
+  assert.equal(thread.human_reviewed_via, "update_classification");
+
+  // A later approval never downgrades the evidence source back.
+  markHumanReviewed(thread, "complete");
+  assert.equal(thread.human_reviewed_via, "update_classification");
+});
+
+test("re-import keeps the review evidence source together with the review flag", () => {
+  const reviewed = aiThread();
+  ensureOriginalClassification(reviewed);
+  markHumanReviewed(reviewed, "approve");
+
+  const merged = prepareImportedThread(
+    aiThread({ thread: { id: "x-A", status: "open" } }),
+    reviewed
+  );
+  assert.equal(isHumanReviewed(merged), true);
+  assert.equal(merged.human_reviewed_via, "approve");
+});
+
+test("a category relabel with the same action is not a correction (client definition)", () => {
+  const thread = aiThread();
+  ensureOriginalClassification(thread);
+  applyHumanClassification(thread, { action: "auto", category: "カジュアルな質問", reason: "ラベルのみ変更" });
+
+  assert.equal(isCorrectedClassification(thread), false);
+  assert.equal(rateOf(thread).correctedItems, 0);
+  assert.equal(computeCorrectionBreakdown([thread]).categoryOnlyChanges, 1);
+});
+
+test("breakdown splits corrections by original source and counts action transitions", () => {
+  const make = (decidedBy, action, finalAction) => {
+    const thread = aiThread({ classification: { action, category: "c", reason: "", decided_by: decidedBy, rule_hit: null } });
+    ensureOriginalClassification(thread);
+    if (finalAction) applyHumanClassification(thread, { action: finalAction, category: "c", reason: "" });
+    else markHumanReviewed(thread, "approve");
+    return thread;
+  };
+  const items = [
+    make("rule", "escalate", "skip"),
+    make("rule", "escalate", "skip"),
+    make("rule", "escalate", null),
+    make("llm", "auto", null),
+    make("llm", "auto", "skip"),
+    make("fallback", "escalate", "auto"),
+    aiThread(), // never reviewed: excluded
+  ];
+  const { bySource, transitions } = computeCorrectionBreakdown(items);
+
+  assert.deepEqual(bySource.rule, { eligibleItems: 3, correctedItems: 2, ratePercent: 66.7 });
+  assert.deepEqual(bySource.llm, { eligibleItems: 2, correctedItems: 1, ratePercent: 50 });
+  assert.deepEqual(bySource.fallback, { eligibleItems: 1, correctedItems: 1, ratePercent: 100 });
+  assert.deepEqual(transitions, { "escalate→skip": 2, "auto→skip": 1, "escalate→auto": 1 });
+});
+
+test("template fallback decisions are snapshotted as an AI original", () => {
+  const thread = aiThread({ classification: { action: "escalate", category: "要本人判断", reason: "", decided_by: "fallback", rule_hit: null } });
+  ensureOriginalClassification(thread);
+  assert.equal(thread.original_classification.decided_by, "fallback");
 });

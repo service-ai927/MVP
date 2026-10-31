@@ -75,7 +75,7 @@ const targetId = target?.thread?.id;
 let draftOk = false, draftDetail = "no target thread";
 if (targetId) {
   const gen = await api(`/api/threads/${encodeURIComponent(targetId)}/generate-draft`, {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tone: "friendly" }),
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ tone: "warm" }),
   });
   draftOk = gen.status === 200 && gen.json?.ok === true;
   draftDetail = `status=${gen.status} body=${JSON.stringify(gen.json).slice(0, 200)}`;
@@ -126,7 +126,7 @@ const cards = await page.locator(".thread-card").count();
 check("production UI renders thread cards", cards > 0, `${cards} cards`);
 check("production UI shows the simulated contact", (await page.locator(".thread-card", { hasText: "相手スモーク" }).count()) > 0, "相手スモーク visible");
 
-await page.click('.tab-btn:has-text("5日間の検証")');
+await page.click('.tab-btn:has-text("検証・計測")');
 await page.waitForSelector(".metrics-view .stat-card", { timeout: 15000 });
 check("dashboard tab renders 4 stat cards", (await page.locator(".metrics-view .stat-card").count()) === 4, `${await page.locator(".metrics-view .stat-card").count()} cards`);
 

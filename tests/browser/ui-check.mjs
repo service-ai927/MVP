@@ -93,6 +93,13 @@ const MEASURE = () => {
     conversation: box(q(".conversation")),
     convBody: box(body),
     convBodyScrollable: !!body && body.scrollHeight > body.clientHeight + 1,
+    // The body is the internal scroller when it has overflow-y auto/scroll and is
+    // bounded by the viewport. Whether the sample content overflows depends on
+    // its length, so overflow alone is not required.
+    convBodyIsScroller:
+      !!body &&
+      ["auto", "scroll"].includes(getComputedStyle(body).overflowY) &&
+      body.getBoundingClientRect().bottom <= window.innerHeight + 1,
     inboxHeaderParts:
       sidebar && list
         ? Array.from(sidebar.children).map((el) => ({
@@ -181,7 +188,7 @@ async function main() {
         m.workspace && Math.abs(m.workspace.bottom - m.innerHeight) <= 1,
         `workspace ${JSON.stringify(m.workspace)}`
       );
-      check(`${tag}: conversation body scrolls internally`, m.convBodyScrollable, `convBody ${JSON.stringify(m.convBody)}`);
+      check(`${tag}: conversation body scrolls internally`, m.convBodyIsScroller, `convBody ${JSON.stringify(m.convBody)} overflowing=${m.convBodyScrollable}`);
     }
 
     check(
@@ -236,7 +243,7 @@ async function main() {
     check(`${tag}: no processing buttons on completed thread`, completed.forbiddenButtons.length === 0, JSON.stringify(completed.forbiddenButtons));
 
     // ---- Tabs ---------------------------------------------------------------
-    await page.click('.tab-btn:has-text("5日間の検証")');
+    await page.click('.tab-btn:has-text("検証・計測")');
     await page.waitForSelector(".metrics-view .stat-card", { timeout: 10000 });
     const metricsCards = await page.locator(".metrics-view .stat-card").count();
     check(`${tag}: dashboard tab renders`, metricsCards === 4, `${metricsCards} stat cards`);

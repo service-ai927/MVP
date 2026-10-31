@@ -2,15 +2,13 @@ import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import {
   Check,
   Upload,
-  ChevronRight,
+  ChevronDown,
   Clock3,
-  FileText,
   Pencil,
   Search,
   Sparkles,
-  User,
   RefreshCw,
-  PlusCircle,
+  Plus,
   Download,
   RotateCcw,
   BarChart3,
@@ -24,7 +22,13 @@ import {
   Send,
   Pause,
   Play,
-  ArrowRight
+  ArrowRight,
+  UserRound,
+  Hand,
+  X,
+  Database,
+  EyeOff,
+  Target,
 } from "lucide-react";
 import "./App.css";
 
@@ -40,6 +44,8 @@ const CLASSIFICATION_CATEGORIES = [
   "断り・クレーム・こじれ",
   "知り合い・元同僚からの連絡",
   "業者の一斉営業",
+  "挨拶・リアクションのみ",
+  "会話の区切り",
   "リンクだけのDM",
   "スパム",
   "その他・不明",
@@ -62,22 +68,48 @@ const STATUS_FILTERS = [
 ];
 
 const CHANNELS = ["All", "x", "linkedin", "email"];
+const CHANNEL_LABELS = { All: "すべて", x: "X", linkedin: "LinkedIn", email: "メール" };
 
 const STATUS_LABELS = {
   All: "すべて",
   New: "新着",
   "Needs review": "確認が必要",
-  "Draft generated": "返信案を生成済み",
+  "Draft generated": "返信案あり",
   "On hold": "保留中",
-  "Returned for revision": "修正のため差し戻し",
+  "Returned for revision": "差し戻し",
   Completed: "完了",
 };
 
 const ACTION_LABELS = {
   auto: "AI返信案",
-  escalate: "担当者確認",
+  escalate: "要確認",
   skip: "返信不要",
   pending: "未分類",
+};
+
+const DECIDED_BY_LABELS = {
+  rule: "機械ルール",
+  llm: "生成AI（Gemini）",
+  fallback: "テンプレート判定（Gemini未使用）",
+  human: "担当者による修正",
+  safety_gate: "安全チェック",
+};
+
+const SOURCE_LABELS = { llm: "Gemini", rule: "機械ルール", fallback: "テンプレート", unknown: "不明" };
+
+const RATING_OPTIONS = [
+  { value: "helpful", label: "そのまま使える", icon: ThumbsUp },
+  { value: "minor_edit", label: "軽い修正で使える", icon: Pencil },
+  { value: "poor", label: "書き直しが必要", icon: ThumbsDown },
+];
+
+const ACTION_TOASTS = {
+  approve: "承認して対応完了にしました",
+  save_draft: "返信案を保存しました",
+  return: "修正のため差し戻しました",
+  hold: "保留にしました",
+  complete: "対応完了にしました",
+  rate_draft: "返信案を評価しました",
 };
 
 function getStatusLabel(status) {
@@ -140,6 +172,7 @@ function mapThread(item) {
     draft: draft.edited || draft.generated || "",
     draftGenerated: draft.generated || "",
     draftEdited: draft.edited || "",
+    draftSource: draft.generator || "",
     gate: draft.gate || "-",
     sendStatus: draft.send_status || "",
     handlingTimeSeconds: item.handling_time_seconds || 0,
@@ -154,12 +187,108 @@ function getStatusClass(status) {
 }
 
 function formatDuration(seconds) {
-  if (!seconds || seconds <= 0) return "0s";
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  if (mins === 0) return `${secs}s`;
-  return `${mins}m ${secs}s`;
+  if (seconds == null) return "—";
+  const total = Math.round(seconds);
+  if (total <= 0) return "0秒";
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  if (mins === 0) return `${secs}秒`;
+  return `${mins}分${secs ? ` ${secs}秒` : ""}`;
 }
+
+function formatTime(iso) {
+  return iso?.slice(11, 16) || "";
+}
+
+function initials(name) {
+  return String(name || "?").replace(/^相手/, "").trim().slice(0, 2) || "?";
+}
+
+function formatPercent(value) {
+  return value == null ? "—" : `${value}%`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Small presentational pieces                                         */
+/* ------------------------------------------------------------------ */
+
+function Avatar({ name, size = "md" }) {
+  return <div className={`avatar avatar-${size}`}>{initials(name)}</div>;
+}
+
+function RatingButtons({ value, onRate }) {
+  return (
+    <div className="rating-row">
+      <span className="rating-label">返信案の評価</span>
+      <div className="rating-options">
+        {RATING_OPTIONS.map(({ value: option, label, icon: Icon }) => (
+          <button
+            key={option}
+            className={`chip-button ${value === option ? "active" : ""} rating-${option}`}
+            onClick={() => onRate(option)}
+          >
+            <Icon size={13} />
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TargetBar({ value, target, direction }) {
+  // direction "max": lower is better (value must stay <= target)
+  const width = value == null ? 0 : Math.min(100, Math.max(0, value));
+  const met = value == null ? null : direction === "max" ? value <= target : value >= target;
+  return (
+    <div className="target-bar">
+      <div className={`target-fill ${met == null ? "" : met ? "met" : "missed"}`} style={{ width: `${width}%` }} />
+      <div className="target-marker" style={{ left: `${target}%` }} title={`目標 ${target}%`} />
+    </div>
+  );
+}
+
+function TargetBadge({ met }) {
+  if (met == null) return <span className="pill pill-muted">データ不足</span>;
+  return met ? <span className="pill pill-success">目標達成</span> : <span className="pill pill-danger">目標未達</span>;
+}
+
+function DistributionBar({ segments }) {
+  const total = segments.reduce((sum, s) => sum + s.value, 0);
+  return (
+    <div className="distribution">
+      <div className="distribution-bar">
+        {total === 0 ? (
+          <div className="distribution-empty" />
+        ) : (
+          segments
+            .filter((s) => s.value > 0)
+            .map((s) => (
+              <div
+                key={s.label}
+                className={`distribution-segment ${s.tone}`}
+                style={{ width: `${(s.value / total) * 100}%` }}
+                title={`${s.label}: ${s.value}`}
+              />
+            ))
+        )}
+      </div>
+      <div className="distribution-legend">
+        {segments.map((s) => (
+          <div key={s.label} className="legend-item">
+            <span className={`legend-dot ${s.tone}`} />
+            <span>{s.label}</span>
+            <strong>{s.value}</strong>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* App                                                                 */
+/* ------------------------------------------------------------------ */
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("inbox"); // 'inbox', 'metrics', 'criteria'
@@ -168,6 +297,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notification, setNotification] = useState("");
+  const [showDataMenu, setShowDataMenu] = useState(false);
 
   // Filters
   const [filter, setFilter] = useState("All");
@@ -204,15 +334,18 @@ export default function App() {
   // Metrics Data
   const [metrics, setMetrics] = useState(null);
 
-  // Active Handling Stopwatch
+  // Handling stopwatch. "manual" = baseline timing with AI output hidden.
   const [stopwatchSeconds, setStopwatchSeconds] = useState(0);
   const [stopwatchActive, setStopwatchActive] = useState(false);
+  const [timingMode, setTimingMode] = useState("mvp");
+  const [manualNote, setManualNote] = useState("");
   const timerRef = useRef(null);
+  const notifyTimer = useRef(null);
 
-  // Notification helper
   const notify = (msg) => {
     setNotification(msg);
-    setTimeout(() => setNotification(""), 4500);
+    clearTimeout(notifyTimer.current);
+    notifyTimer.current = setTimeout(() => setNotification(""), 4500);
   };
 
   // Load threads
@@ -254,7 +387,6 @@ export default function App() {
     loadMetrics();
   }, [loadThreads, loadMetrics]);
 
-  // Selected Thread
   const selectedThread = threads.find((t) => t.id === selectedId);
 
   // Sync draft edit buffer and memo when selected thread changes
@@ -265,8 +397,9 @@ export default function App() {
       setEditingDraft(false);
       setEditingMemo(false);
       setEditingClassification(false);
+      setManualNote("");
 
-      // サンプル復元 & start timer for current thread
+      // Restart the handling timer for the newly selected thread
       setStopwatchSeconds(0);
       setStopwatchActive(true);
     }
@@ -304,6 +437,13 @@ export default function App() {
     });
   }, [threads, filter, channelFilter, search]);
 
+  const statusCounts = useMemo(() => {
+    const counts = {};
+    for (const t of threads) counts[t.status] = (counts[t.status] || 0) + 1;
+    counts.All = threads.length;
+    return counts;
+  }, [threads]);
+
   function updateLocalThread(id, changes) {
     setThreads((current) =>
       current.map((t) => (t.id === id ? { ...t, ...changes } : t))
@@ -311,17 +451,19 @@ export default function App() {
   }
 
   // Record elapsed stopwatch time to server
-  async function recordCurrentTime() {
+  async function recordCurrentTime(mode = "mvp") {
     if (stopwatchSeconds > 0 && selectedId) {
       try {
         await fetch(`/api/threads/${selectedId}/action`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "record_time", seconds: stopwatchSeconds }),
+          body: JSON.stringify({ action: "record_time", seconds: stopwatchSeconds, mode }),
         });
-        updateLocalThread(selectedId, {
-          handlingTimeSeconds: (selectedThread?.handlingTimeSeconds || 0) + stopwatchSeconds,
-        });
+        if (mode === "mvp") {
+          updateLocalThread(selectedId, {
+            handlingTimeSeconds: (selectedThread?.handlingTimeSeconds || 0) + stopwatchSeconds,
+          });
+        }
         setStopwatchSeconds(0);
         loadMetrics();
       } catch (e) {
@@ -330,10 +472,34 @@ export default function App() {
     }
   }
 
+  function startManualBaseline() {
+    setTimingMode("manual");
+    setStopwatchSeconds(0);
+    setStopwatchActive(true);
+    setManualNote("");
+  }
+
+  async function finishManualBaseline() {
+    const seconds = stopwatchSeconds;
+    await recordCurrentTime("manual");
+    setTimingMode("mvp");
+    setManualNote("");
+    setStopwatchSeconds(0);
+    setStopwatchActive(true);
+    notify(`手作業の基準時間を記録しました（${formatDuration(seconds)}）`);
+  }
+
+  function cancelManualBaseline() {
+    setTimingMode("mvp");
+    setManualNote("");
+    setStopwatchSeconds(0);
+    notify("手作業の計測を中止しました（記録していません）");
+  }
+
   // Workflow actions
   async function performAction(actionName, changes = {}) {
     if (!selectedId) return null;
-    await recordCurrentTime();
+    await recordCurrentTime("mvp");
 
     try {
       const res = await fetch(`/api/threads/${selectedId}/action`, {
@@ -350,7 +516,7 @@ export default function App() {
 
       const mapped = mapThread(data.thread);
       updateLocalThread(selectedId, mapped);
-      notify(`操作を適用しました：${actionName.replace("_", " ")}`);
+      notify(ACTION_TOASTS[actionName] || "操作を適用しました");
       loadMetrics();
       return mapped;
     } catch (err) {
@@ -360,14 +526,12 @@ export default function App() {
     }
   }
 
-  // Approve
   async function handleApprove() {
     const textToApprove = editingDraft ? draftEditText : selectedThread?.draft;
     await performAction("approve", { draft: textToApprove });
     setEditingDraft(false);
   }
 
-  // 保存 Draft Edit
   async function handleSaveDraftEdit() {
     await performAction("save_draft", { draft: draftEditText });
     setEditingDraft(false);
@@ -387,7 +551,8 @@ export default function App() {
       if (!res.ok) throw new Error(data.error || "Triage failed");
       const mapped = mapThread(data.thread);
       updateLocalThread(selectedId, mapped);
-      notify("AI振り分けが完了しました（ルール → AI → 安全チェック）");
+      setDraftEditText(mapped.draft);
+      notify("再振り分けが完了しました");
       loadMetrics();
     } catch (err) {
       notify(`振り分けエラー：${err.message}`);
@@ -419,8 +584,8 @@ export default function App() {
         !data.gatePassed
           ? `安全チェックで要確認：${data.reason || "内容を確認してください"}`
           : data.source === "gemini"
-            ? "Gemini AIで返信案を生成しました。送信前に内容を確認してください。"
-            : "AIサービスを利用できないため、テンプレート案を作成しました。必ず内容を確認してください。"
+            ? "Geminiで返信案を生成しました。内容を確認してください。"
+            : "AIを利用できないため、テンプレート案を作成しました。必ず内容を確認してください。"
       );
       loadMetrics();
     } catch (err) {
@@ -430,7 +595,6 @@ export default function App() {
     }
   }
 
-  // 保存 Contact Memo
   async function handleSaveMemo() {
     if (!selectedId) return;
     try {
@@ -442,14 +606,13 @@ export default function App() {
       if (res.ok) {
         updateLocalThread(selectedId, { memo: memoDraft });
         setEditingMemo(false);
-        notify("連絡先メモを保存しました");
+        notify("メモを保存しました");
       }
     } catch {
-      notify("連絡先メモを保存できませんでした");
+      notify("メモを保存できませんでした");
     }
   }
 
-  // 保存 Classification Override
   async function handleSaveClassification() {
     if (!selectedId) return;
     try {
@@ -472,20 +635,30 @@ export default function App() {
     }
   }
 
-  // Rate Draft Quality
-  async function handleRateDraft(rating) {
-    await performAction("rate_draft", { rating });
-    notify(`返信案を評価しました：${rating === "helpful" ? "良好 👍" : rating === "minor_edit" ? "軽微な修正が必要 ✏️" : "要修正 👎"}`);
+  function openClassificationEditor(preset) {
+    setClassificationDraft(
+      preset || {
+        action: selectedThread.action,
+        category: selectedThread.category,
+        reason: selectedThread.reason,
+      }
+    );
+    setEditingClassification(true);
   }
 
-  // Batch triage all pending
+  async function handleRateDraft(rating) {
+    const label = RATING_OPTIONS.find((o) => o.value === rating)?.label || rating;
+    await performAction("rate_draft", { rating });
+    notify(`返信案を評価しました：${label}`);
+  }
+
   async function handleBatchTriage() {
     try {
-      notify("未処理の会話を一括で振り分けています...");
+      notify("未処理の会話を振り分けています...");
       const res = await fetch("/api/triage-all", { method: "POST" });
       const data = await res.json();
       if (res.ok) {
-        notify(`一括振り分けが完了しました：${data.triagedCount}件`);
+        notify(`振り分けが完了しました：${data.triagedCount}件`);
         loadThreads();
         loadMetrics();
       }
@@ -494,26 +667,25 @@ export default function App() {
     }
   }
 
-  // サンプル復元 to benchmark sample data
   async function handleResetSamples() {
+    setShowDataMenu(false);
     try {
       const res = await fetch("/api/reset-samples", { method: "POST" });
       const data = await res.json();
-      if (res.ok) {
-        const mapped = data.threads.map(mapThread);
-        setThreads(mapped);
-        if (mapped.length > 0) setSelectedId(mapped[0].id);
-        notify("初期サンプル会話を復元しました");
-        loadMetrics();
-      }
+      if (!res.ok) throw new Error(data.error || "reset failed");
+      const mapped = data.threads.map(mapThread);
+      setThreads(mapped);
+      if (mapped.length > 0) setSelectedId(mapped[0].id);
+      notify("サンプル会話を復元しました");
+      loadMetrics();
     } catch {
-      notify("サンプルデータを復元できませんでした");
+      notify("サンプルデータを復元できませんでした（サーバー設定で無効化されています）");
     }
   }
 
-  // JSONをインポート File
   async function handleImportJson(event) {
     const file = event.target.files?.[0];
+    setShowDataMenu(false);
     if (!file) return;
 
     try {
@@ -541,7 +713,6 @@ export default function App() {
     }
   }
 
-  // Create Simulated Reply
   async function handleCreateSimulatedReply(e) {
     e.preventDefault();
     if (!newSimMsg.messageText.trim()) return;
@@ -567,30 +738,937 @@ export default function App() {
         memo: "",
         messageText: "",
       });
-      notify("テスト用の受信メッセージを追加し、振り分けました");
+      notify("受信メッセージを追加して振り分けました");
       loadMetrics();
     } catch (err) {
       notify(`メッセージの追加に失敗しました：${err.message}`);
     }
   }
 
-  return (
-    <div className="app-shell">
-      {/* TOPBAR */}
-      <header className="topbar">
-        <div>
-          <div className="eyebrow">AIを活用したアウトリーチ返信管理</div>
-          <h1>アウトリーチ返信管理 MVP</h1>
+  const manualDone = metrics?.handlingTime?.manualBaseline?.items ?? 0;
+  const manualTarget = metrics?.handlingTime?.manualBaseline?.targetSampleSize ?? 10;
+  const manualMode = timingMode === "manual";
+
+  /* ---------------------------------------------------------------- */
+  /* Right-panel sections                                              */
+  /* ---------------------------------------------------------------- */
+
+  function renderManualBaselinePanel() {
+    return (
+      <div className="card manual-panel">
+        <div className="card-header">
+          <div>
+            <div className="eyebrow">手作業の基準計測</div>
+            <h3>AIの結果を非表示にしています</h3>
+          </div>
+          <EyeOff size={18} className="icon-muted" />
+        </div>
+        <p className="card-text">
+          MVPを使わずに対応した場合の時間を測ります。会話を読み、自分で判断と返信文の作成まで行ってから「計測を終了して記録」を押してください。
+        </p>
+        <textarea
+          className="input textarea"
+          placeholder="作業用メモ（保存されません）"
+          value={manualNote}
+          onChange={(e) => setManualNote(e.target.value)}
+        />
+        <div className="button-row end">
+          <button className="btn btn-ghost" onClick={cancelManualBaseline}>
+            中止
+          </button>
+          <button className="btn btn-primary" onClick={finishManualBaseline} disabled={stopwatchSeconds <= 0}>
+            <Check size={15} />
+            計測を終了して記録（{formatDuration(stopwatchSeconds)}）
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  function renderClassificationCard() {
+    return (
+      <div className="card">
+        <div className="card-header">
+          <div>
+            <div className="eyebrow">AIの判定</div>
+            <h3>分類結果</h3>
+          </div>
+          <Sparkles size={18} className="icon-accent" />
         </div>
 
-        {/* View Switch Tabs */}
-        <div className="topbar-center">
+        {editingClassification ? (
+          <div className="form-stack">
+            <label className="field">
+              <span>対応方針</span>
+              <select
+                className="input"
+                value={classificationDraft.action}
+                onChange={(e) => setClassificationDraft((prev) => ({ ...prev, action: e.target.value }))}
+              >
+                {CLASSIFICATION_ACTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>分類カテゴリ</span>
+              <select
+                className="input"
+                value={classificationDraft.category}
+                onChange={(e) => setClassificationDraft((prev) => ({ ...prev, category: e.target.value }))}
+              >
+                {!CLASSIFICATION_CATEGORIES.includes(classificationDraft.category) && classificationDraft.category && (
+                  <option value={classificationDraft.category}>{classificationDraft.category}</option>
+                )}
+                {CLASSIFICATION_CATEGORIES.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>理由</span>
+              <textarea
+                className="input textarea"
+                value={classificationDraft.reason}
+                onChange={(e) => setClassificationDraft((prev) => ({ ...prev, reason: e.target.value }))}
+                placeholder="分類理由を入力..."
+              />
+            </label>
+
+            <div className="button-row end">
+              <button className="btn btn-ghost" onClick={() => setEditingClassification(false)}>
+                キャンセル
+              </button>
+              <button className="btn btn-primary" onClick={handleSaveClassification}>
+                <Check size={15} />
+                修正を保存
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="decision-row">
+              <span className={`action-tag ${selectedThread.action}`}>{getActionLabel(selectedThread.action)}</span>
+              <span className="decision-category">{selectedThread.category}</span>
+            </div>
+
+            <dl className="detail-list">
+              <div>
+                <dt>理由</dt>
+                <dd>{selectedThread.reason}</dd>
+              </div>
+              {selectedThread.ruleHit && (
+                <div>
+                  <dt>適用ルール</dt>
+                  <dd className="text-warning">{selectedThread.ruleHit}</dd>
+                </div>
+              )}
+              <div>
+                <dt>判断元</dt>
+                <dd>{DECIDED_BY_LABELS[selectedThread.decidedBy] || "振り分け処理"}</dd>
+              </div>
+            </dl>
+
+            {selectedThread.status !== "Completed" && (
+              <div className="button-row">
+                <button className="btn btn-secondary grow" onClick={() => openClassificationEditor()}>
+                  <Pencil size={14} />
+                  分類を修正
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  title="機械ルールとAIで再振り分け"
+                  disabled={isTriaging}
+                  onClick={handleRerunTriage}
+                >
+                  <RefreshCw size={14} className={isTriaging ? "spin" : ""} />
+                  {isTriaging ? "振り分け中..." : "再振り分け"}
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  function renderGate() {
+    if (!selectedThread.gate || selectedThread.gate === "-") return null;
+    const passed = selectedThread.gate.includes("合格");
+    return (
+      <div className={`gate ${passed ? "passed" : "warning"}`}>
+        {passed ? <ShieldCheck size={16} /> : <ShieldAlert size={16} />}
+        <div>
+          <strong>安全チェック：{selectedThread.gate}</strong>
+          <span>
+            {passed
+              ? "成果物の約束・日時・金額・外部リンクは含まれていません。"
+              : "返信案に約束や条件が含まれる可能性があります。必ず確認してください。"}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  function renderWorkflowCard() {
+    if (selectedThread.status === "Completed") {
+      return (
+        <div className="card completion-panel">
+          <div className="completion-icon">
+            <Check size={22} />
+          </div>
+          <h3>対応完了</h3>
+          <p className="card-text">
+            {selectedThread.action === "skip"
+              ? "返信不要として完了しました。"
+              : "この会話は完了として記録されました。外部サービスへの送信は行っていません。"}
+          </p>
+          {selectedThread.draftGenerated && (
+            <RatingButtons value={selectedThread.qualityRating} onRate={handleRateDraft} />
+          )}
+        </div>
+      );
+    }
+
+    if (selectedThread.action === "skip") {
+      return (
+        <div className="card empty-draft">
+          <Clock3 size={24} className="icon-muted" />
+          <h3>返信不要</h3>
+          <p className="card-text">営業・勧誘、リンクのみ、答える内容のないメッセージなどと判定されました。</p>
+          <div className="button-row center">
+            <button
+              className="btn btn-secondary"
+              onClick={() =>
+                openClassificationEditor({
+                  action: "auto",
+                  category: "カジュアルな質問",
+                  reason: "担当者が返信不要の判定を変更しました",
+                })
+              }
+            >
+              <Pencil size={14} />
+              返信が必要に変更
+            </button>
+            <button className="btn btn-primary" onClick={() => performAction("complete")}>
+              <Check size={14} />
+              返信不要として完了
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (selectedThread.action === "escalate") {
+      return (
+        <div className="card escalation-panel">
+          <div className="card-header">
+            <div>
+              <div className="eyebrow warning">担当者の判断が必要</div>
+              <h3>自動返信を停止しています</h3>
+            </div>
+            <Hand size={18} className="icon-warning" />
+          </div>
+
+          <div className="callout warning">{selectedThread.reason}</div>
+
+          <div className="field">
+            <span>返信を作成</span>
+            <textarea
+              className="input textarea tall"
+              placeholder="返信文を入力するか、テンプレートを選択..."
+              value={draftEditText}
+              onChange={(e) => setDraftEditText(e.target.value)}
+            />
+          </div>
+
+          <div className="template-chips">
+            <button
+              className="chip-button"
+              onClick={() =>
+                setDraftEditText(
+                  "ご連絡ありがとうございます！日程の候補を確認いたしました。◯月◯日◯時でお願いいたします。当日はよろしくお願いいたします。"
+                )
+              }
+            >
+              <Plus size={12} /> 日程を承諾
+            </button>
+            <button
+              className="chip-button"
+              onClick={() =>
+                setDraftEditText(
+                  "ご提案ありがとうございます。大変魅力的なお話ですが、現時点では体制の都合上一旦見送りとさせていただけますと幸いです。また機会がありましたらよろしくお願いいたします。"
+                )
+              }
+            >
+              <Plus size={12} /> 丁寧にお断り
+            </button>
+            <button
+              className="chip-button"
+              onClick={() =>
+                setDraftEditText(
+                  "詳細な条件を教えてくださりありがとうございます。社内で確認の上、改めてご連絡いたします。"
+                )
+              }
+            >
+              <Plus size={12} /> 条件を確認
+            </button>
+          </div>
+
+          <div className="button-row wrap">
+            <button className="btn btn-ghost" onClick={() => performAction("hold")}>
+              <Pause size={14} />
+              保留にする
+            </button>
+            <button className="btn btn-ghost" onClick={() => performAction("return")}>
+              <RotateCcw size={14} />
+              差し戻す
+            </button>
+            {selectedThread.status === "On hold" && (
+              <button className="btn btn-ghost" onClick={() => performAction("complete")}>
+                <Check size={14} />
+                保留から完了にする
+              </button>
+            )}
+            <button
+              className="btn btn-primary grow"
+              disabled={!draftEditText.trim()}
+              onClick={() => performAction("approve", { draft: draftEditText })}
+            >
+              <Send size={14} />
+              承認して完了
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="card draft-panel">
+        <div className="card-header">
+          <div>
+            <div className="eyebrow">AI返信案</div>
+            <h3>返信案</h3>
+          </div>
+          {selectedThread.draftSource && (
+            <span className={`pill ${selectedThread.draftSource === "gemini" ? "pill-accent" : "pill-muted"}`}>
+              {selectedThread.draftSource === "gemini" ? "Gemini" : "テンプレート"}
+            </span>
+          )}
+        </div>
+
+        {editingDraft ? (
+          <textarea
+            className="input textarea tall"
+            value={draftEditText}
+            onChange={(e) => setDraftEditText(e.target.value)}
+          />
+        ) : (
+          <div className="draft-content">
+            {selectedThread.draft || "返信案はまだありません。「再生成」で作成してください。"}
+          </div>
+        )}
+
+        <div className="regen-box">
+          <div className="regen-top">
+            <span>文体</span>
+            <select className="input compact" value={customTone} onChange={(e) => setCustomTone(e.target.value)}>
+              <option value="warm">親しみやすく丁寧</option>
+              <option value="professional">フォーマル</option>
+              <option value="concise">簡潔</option>
+              <option value="consultative">相談・アドバイス調</option>
+            </select>
+          </div>
+          <div className="regen-input">
+            <input
+              className="input"
+              placeholder="追加の指示（任意）"
+              value={customGuidance}
+              onChange={(e) => setCustomGuidance(e.target.value)}
+            />
+            <button className="btn btn-secondary" disabled={isRegenerating} onClick={handleRegenerateDraft}>
+              <RefreshCw size={14} className={isRegenerating ? "spin" : ""} />
+              {isRegenerating ? "生成中..." : "再生成"}
+            </button>
+          </div>
+        </div>
+
+        <div className="button-row">
+          {editingDraft ? (
+            <>
+              <button className="btn btn-ghost" onClick={() => setEditingDraft(false)}>
+                キャンセル
+              </button>
+              <button className="btn btn-secondary" onClick={handleSaveDraftEdit}>
+                編集内容を保存
+              </button>
+            </>
+          ) : (
+            <button
+              className="btn btn-secondary"
+              onClick={() => {
+                setDraftEditText(selectedThread.draft);
+                setEditingDraft(true);
+              }}
+            >
+              <Pencil size={14} />
+              返信案を編集
+            </button>
+          )}
           <button
-            className={`tab-btn ${activeTab === "inbox" ? "active" : ""}`}
-            onClick={() => setActiveTab("inbox")}
+            className="btn btn-primary grow"
+            disabled={!String(editingDraft ? draftEditText : selectedThread.draft).trim()}
+            onClick={handleApprove}
           >
+            <Check size={14} />
+            承認して完了
+          </button>
+        </div>
+
+        <div className="button-row subtle">
+          <button className="btn btn-link" onClick={() => performAction("return")}>
+            <RotateCcw size={13} />
+            差し戻す
+          </button>
+          <button className="btn btn-link" onClick={() => performAction("hold")}>
+            <Pause size={13} />
+            保留にする
+          </button>
+          {selectedThread.status === "On hold" && (
+            <button className="btn btn-link" onClick={() => performAction("complete")}>
+              <Check size={13} />
+              保留から完了にする
+            </button>
+          )}
+        </div>
+
+        {selectedThread.draftGenerated && (
+          <RatingButtons value={selectedThread.qualityRating} onRate={handleRateDraft} />
+        )}
+      </div>
+    );
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Views                                                             */
+  /* ---------------------------------------------------------------- */
+
+  function renderInbox() {
+    if (loading) return <div className="state-message">会話を読み込み中...</div>;
+    if (error) return <div className="state-message error">会話の読み込みに失敗しました：{error}</div>;
+
+    return (
+      <main className="workspace">
+        <aside className="sidebar">
+          <div className="sidebar-heading">
+            <div>
+              <h2>受信箱</h2>
+              <span>
+                {filteredThreads.length} / {threads.length}件
+              </span>
+            </div>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={handleBatchTriage}
+              title="未処理の会話をルールとAIで振り分け"
+            >
+              <RefreshCw size={13} />
+              すべて振り分け
+            </button>
+          </div>
+
+          <div className="sidebar-controls">
+            <div className="search-row">
+              <div className="search-box">
+                <Search size={15} />
+                <input
+                  placeholder="連絡先・メッセージ・メモを検索"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
+              <select
+                className="input compact"
+                value={channelFilter}
+                onChange={(e) => setChannelFilter(e.target.value)}
+                aria-label="チャネルで絞り込み"
+              >
+                {CHANNELS.map((ch) => (
+                  <option key={ch} value={ch}>
+                    {ch === "All" ? "全チャネル" : CHANNEL_LABELS[ch]}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="filter-row scroll">
+              {STATUS_FILTERS.map((s) => (
+                <button key={s} className={`filter ${filter === s ? "active" : ""}`} onClick={() => setFilter(s)}>
+                  {getStatusLabel(s)}
+                  <span className="filter-count">{statusCounts[s] || 0}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="thread-list">
+            {filteredThreads.length === 0 ? (
+              <div className="empty-list">条件に一致する会話はありません。</div>
+            ) : (
+              filteredThreads.map((thread) => {
+                const lastMsg = thread.messages[thread.messages.length - 1];
+                return (
+                  <button
+                    key={thread.id}
+                    className={`thread-card ${selectedId === thread.id ? "selected" : ""}`}
+                    onClick={() => setSelectedId(thread.id)}
+                  >
+                    <Avatar name={thread.name} size="sm" />
+                    <div className="thread-main">
+                      <div className="thread-top">
+                        <strong>{thread.name}</strong>
+                        <span className="thread-time">{formatTime(lastMsg?.time)}</span>
+                      </div>
+                      <p>{lastMsg?.text || "（メッセージ本文なし）"}</p>
+                      <div className="thread-meta">
+                        {/* Manual baseline timing hides every AI-derived hint. */}
+                        {!manualMode && (
+                          <>
+                            <span className={`action-tag small ${thread.action}`}>{getActionLabel(thread.action)}</span>
+                            <span className={`badge ${getStatusClass(thread.status)}`}>{getStatusLabel(thread.status)}</span>
+                          </>
+                        )}
+                        <span className={`channel-tag ${thread.channel.toLowerCase()}`}>
+                          {CHANNEL_LABELS[thread.channel] || thread.channel}
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </aside>
+
+        {selectedThread ? (
+          <section className="conversation">
+            <div className="conversation-header">
+              <div className="person">
+                <Avatar name={selectedThread.name} />
+                <div className="person-text">
+                  <div className="person-title">
+                    <h2>{selectedThread.name}</h2>
+                    <span className={`channel-tag ${selectedThread.channel.toLowerCase()}`}>
+                      {CHANNEL_LABELS[selectedThread.channel] || selectedThread.channel} · {selectedThread.account}
+                    </span>
+                  </div>
+                  <p>{selectedThread.handle}</p>
+                </div>
+              </div>
+
+              <div className="header-controls">
+                <div className={`timer-box ${manualMode ? "manual" : ""}`} title="この会話の対応にかかった時間">
+                  <Timer size={14} />
+                  <span>{manualMode ? "手作業" : "経過"} {formatDuration(stopwatchSeconds)}</span>
+                  <button
+                    className="icon-button"
+                    onClick={() => setStopwatchActive(!stopwatchActive)}
+                    title={stopwatchActive ? "タイマーを一時停止" : "タイマーを再開"}
+                  >
+                    {stopwatchActive ? <Pause size={12} /> : <Play size={12} />}
+                  </button>
+                </div>
+                {!manualMode && selectedThread.status !== "Completed" && (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={startManualBaseline}
+                    title="AIの結果を隠して、手作業での対応時間を計測します"
+                  >
+                    <Hand size={13} />
+                    手作業で計測
+                    <span className="filter-count">
+                      {manualDone}/{manualTarget}
+                    </span>
+                  </button>
+                )}
+                {!manualMode && (
+                  <span className={`badge ${getStatusClass(selectedThread.status)}`}>
+                    {getStatusLabel(selectedThread.status)}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="conversation-body">
+              <div className="messages">
+                <div className="memo-box">
+                  <div className="memo-head">
+                    <span className="eyebrow">メモ</span>
+                    {!editingMemo && (
+                      <button
+                        className="btn btn-link"
+                        onClick={() => {
+                          setMemoDraft(selectedThread.memo);
+                          setEditingMemo(true);
+                        }}
+                      >
+                        <Pencil size={12} />
+                        編集
+                      </button>
+                    )}
+                  </div>
+                  {editingMemo ? (
+                    <div className="memo-edit">
+                      <input
+                        className="input"
+                        placeholder="連絡先の背景や会話のメモ"
+                        value={memoDraft}
+                        onChange={(e) => setMemoDraft(e.target.value)}
+                      />
+                      <button className="btn btn-primary btn-sm" onClick={handleSaveMemo}>
+                        <Check size={12} />
+                        保存
+                      </button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => setEditingMemo(false)}>
+                        キャンセル
+                      </button>
+                    </div>
+                  ) : (
+                    <p className={selectedThread.memo ? "" : "muted"}>
+                      {selectedThread.memo || "メモはありません。"}
+                    </p>
+                  )}
+                </div>
+
+                {selectedThread.messages.map((message, idx) => (
+                  <div key={idx} className={message.fromMe ? "message mine" : "message received"}>
+                    <div className="message-author">{message.fromMe ? "自分" : selectedThread.name}</div>
+                    <div className="message-bubble">{message.text}</div>
+                    <div className="message-time">{formatTime(message.time) || message.time}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="right-panel">
+                {manualMode ? (
+                  renderManualBaselinePanel()
+                ) : (
+                  <>
+                    {renderClassificationCard()}
+                    {renderGate()}
+                    {renderWorkflowCard()}
+                  </>
+                )}
+              </div>
+            </div>
+          </section>
+        ) : (
+          <div className="state-message">会話を選択すると詳細が表示されます。</div>
+        )}
+      </main>
+    );
+  }
+
+  function renderMetrics() {
+    const correction = metrics?.correctionRate;
+    const ratings = metrics?.ratings;
+    const handling = metrics?.handlingTime;
+    const targets = metrics?.targets || { correctionMaxPercent: 15, usabilityMinPercent: 70 };
+    const transitions = Object.entries(correction?.transitions || {}).sort((a, b) => b[1] - a[1]);
+    const ACTION_SHORT = { auto: "自動", escalate: "要確認", skip: "返信不要" };
+
+    return (
+      <section className="metrics-view">
+        <div className="view-header">
+          <div>
+            <h2>検証・計測</h2>
+            <p>担当者のレビュー結果から、合意した成功基準の達成状況を集計します。</p>
+          </div>
+          <div className="button-row">
+            <button className="btn btn-secondary" onClick={loadMetrics}>
+              <RefreshCw size={14} />
+              更新
+            </button>
+            <a href="/api/export" download="outreach-threads.json" className="btn btn-primary">
+              <Download size={14} />
+              計測データを出力
+            </a>
+          </div>
+        </div>
+
+        {metrics && (
+          <>
+            <div className="metrics-hero">
+              <div className="stat-card">
+                <div className="stat-head">
+                  <span className="label">分類を直した割合</span>
+                  <TargetBadge met={correction?.targetMet} />
+                </div>
+                <div className="value">{formatPercent(correction?.ratePercent)}</div>
+                <TargetBar value={correction?.ratePercent} target={targets.correctionMaxPercent} direction="max" />
+                <div className="sub">
+                  目標 {targets.correctionMaxPercent}%以下 · {correction?.correctedItems ?? 0} / {correction?.eligibleReviewedItems ?? 0}件
+                </div>
+              </div>
+
+              <div className="stat-card">
+                <div className="stat-head">
+                  <span className="label">そのまま〜軽い修正で使えた割合</span>
+                  <TargetBadge met={ratings?.targetMet} />
+                </div>
+                <div className="value">{formatPercent(ratings?.usablePercent)}</div>
+                <TargetBar value={ratings?.usablePercent} target={targets.usabilityMinPercent} direction="min" />
+                <div className="sub">
+                  目標 {targets.usabilityMinPercent}%以上 · {(ratings?.helpful ?? 0) + (ratings?.minorEdit ?? 0)} / {ratings?.totalRatings ?? 0}件
+                </div>
+              </div>
+
+              <div className="stat-card">
+                <div className="stat-head">
+                  <span className="label">手作業の平均時間（基準）</span>
+                  {handling?.manualBaseline?.sampleComplete ? (
+                    <span className="pill pill-success">10件完了</span>
+                  ) : (
+                    <span className="pill pill-muted">
+                      {handling?.manualBaseline?.items ?? 0}/{handling?.manualBaseline?.targetSampleSize ?? 10}件
+                    </span>
+                  )}
+                </div>
+                <div className="value">{formatDuration(handling?.manualBaseline?.meanSeconds)}</div>
+                <div className="sub">最初の10件を「手作業で計測」で記録します。</div>
+              </div>
+
+              <div className="stat-card">
+                <div className="stat-head">
+                  <span className="label">MVP利用時の平均時間</span>
+                  {handling?.reductionPercent != null && handling?.manualBaseline?.sampleComplete && (
+                    <span className="pill pill-accent">−{handling.reductionPercent}%</span>
+                  )}
+                </div>
+                <div className="value">{formatDuration(handling?.mvpAssisted?.meanSeconds)}</div>
+                <div className="sub">{handling?.mvpAssisted?.items ?? 0}件の実測値</div>
+              </div>
+            </div>
+
+            <div className="metrics-grid">
+              <div className="panel-card">
+                <h3>判定元別の修正率</h3>
+                <p className="card-text">どの段階の判定が直されているかを確認します。</p>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>判定元</th>
+                      <th>対象</th>
+                      <th>修正</th>
+                      <th>修正率</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {["llm", "rule", "fallback"].map((source) => {
+                      const row = correction?.bySource?.[source] || {};
+                      return (
+                        <tr key={source}>
+                          <td>{SOURCE_LABELS[source]}</td>
+                          <td>{row.eligibleItems ?? 0}</td>
+                          <td>{row.correctedItems ?? 0}</td>
+                          <td>
+                            <strong>{formatPercent(row.ratePercent)}</strong>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="panel-card">
+                <h3>直し方の内訳</h3>
+                <p className="card-text">AIの判定 → 担当者の最終判断</p>
+                {transitions.length === 0 ? (
+                  <div className="empty-list">まだ修正はありません。</div>
+                ) : (
+                  <ul className="transition-list">
+                    {transitions.map(([key, count]) => {
+                      const [from, to] = key.split("→");
+                      return (
+                        <li key={key}>
+                          <span className={`action-tag small ${from}`}>{ACTION_SHORT[from] || from}</span>
+                          <ArrowRight size={13} className="icon-muted" />
+                          <span className={`action-tag small ${to}`}>{ACTION_SHORT[to] || to}</span>
+                          <strong>{count}件</strong>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                {correction?.categoryOnlyChanges > 0 && (
+                  <p className="footnote">カテゴリ名のみの変更 {correction.categoryOnlyChanges}件（修正には含めません）</p>
+                )}
+              </div>
+
+              <div className="panel-card">
+                <h3>返信案の評価</h3>
+                <DistributionBar
+                  segments={[
+                    { label: "そのまま使える", value: ratings?.helpful ?? 0, tone: "success" },
+                    { label: "軽い修正で使える", value: ratings?.minorEdit ?? 0, tone: "accent" },
+                    { label: "書き直しが必要", value: ratings?.poor ?? 0, tone: "danger" },
+                  ]}
+                />
+                <p className="footnote">
+                  生成元：Gemini {metrics.draftSources?.gemini ?? 0}件 / テンプレート {metrics.draftSources?.template_fallback ?? 0}件
+                </p>
+              </div>
+
+              <div className="panel-card">
+                <h3>現在の振り分け</h3>
+                <DistributionBar
+                  segments={[
+                    { label: "AI返信案", value: metrics.counts.auto, tone: "accent" },
+                    { label: "要確認", value: metrics.counts.escalate, tone: "warning" },
+                    { label: "返信不要", value: metrics.counts.skip, tone: "neutral" },
+                  ]}
+                />
+                <div className="mini-stats">
+                  <div>
+                    <span>完了</span>
+                    <strong>{metrics.statusCounts.completed}</strong>
+                  </div>
+                  <div>
+                    <span>承認待ち</span>
+                    <strong>{metrics.statusCounts.draftGenerated}</strong>
+                  </div>
+                  <div>
+                    <span>確認が必要</span>
+                    <strong>{metrics.statusCounts.needsReview}</strong>
+                  </div>
+                  <div>
+                    <span>保留</span>
+                    <strong>{metrics.statusCounts.onHold}</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="panel-card note-card">
+              <Target size={18} className="icon-accent" />
+              <div>
+                <strong>計測の定義</strong>
+                <p>
+                  分類を直した割合 = AIの最初の判定（自動・要確認・返信不要）を担当者が変えた件数 ÷ レビュー済み件数。
+                  返信案の評価は、最後に生成された返信案に対する評価のみを数えます。手作業の時間はAIの結果を非表示にした状態で計測します。
+                </p>
+              </div>
+            </div>
+          </>
+        )}
+      </section>
+    );
+  }
+
+  function renderGuide() {
+    return (
+      <section className="guide-view">
+        <div className="view-header">
+          <div>
+            <h2>判定基準・ルール</h2>
+            <p>クライアント提供の判定基準、良い例・悪い例、安全上の注意点に基づくガイドです。</p>
+          </div>
+        </div>
+
+        <div className="guide-card flow">
+          <h3>処理の流れ</h3>
+          <div className="flow-steps">
+            <div>
+              <span>1</span>
+              <strong>機械ルール</strong>
+              <p>返信不要と、本人判断が必須の内容を先に判定</p>
+            </div>
+            <ArrowRight size={16} className="icon-muted" />
+            <div>
+              <span>2</span>
+              <strong>生成AI（Gemini）</strong>
+              <p>文脈から判定し、返信案を作成</p>
+            </div>
+            <ArrowRight size={16} className="icon-muted" />
+            <div>
+              <span>3</span>
+              <strong>安全チェック</strong>
+              <p>約束・日時・金額・URLを検査し、違反は書き直しか確認へ</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="guide-grid">
+          <div className="guide-card tone-warning">
+            <h3>担当者の判断が必須（例外なし）</h3>
+            <ul>
+              <li><strong>日程・MTGの日時</strong>：日程調整・候補日・ご都合の確認</li>
+              <li><strong>金額・条件・契約</strong>：◯万円、成果報酬、固定額、見積・契約条件</li>
+              <li><strong>実績の数字を聞かれている</strong>：DL数、売上、月商など</li>
+              <li><strong>断り・クレーム・こじれ</strong>：見送り、苦情、返金</li>
+              <li><strong>知り合い・元同僚</strong>：お久しぶり、元同僚（「同期設計」等の技術用語は除外）</li>
+            </ul>
+          </div>
+
+          <div className="guide-card tone-neutral">
+            <h3>返信不要と判定</h3>
+            <ul>
+              <li><strong>業者の一斉営業</strong>：罫線・▼登録はこちら・キャンペーン等の定型</li>
+              <li><strong>初回の営業・勧誘</strong>：こちらから連絡していない相手からの売り込み・勧誘・スパム（料金や打ち合わせに触れていても返信不要）</li>
+              <li><strong>挨拶・リアクションのみ</strong>：初回のフォロー礼・応援など答える内容がないもの</li>
+              <li><strong>リンクだけのDM</strong>：URLのみ、またはリンク付きの告知のみ</li>
+              <li><strong>会話の区切り</strong>：こちらの返信への「了解です」等のみ</li>
+            </ul>
+            <p className="footnote">見込み客からの依頼・相談、知人、進行中の会話は返信不要にしません。</p>
+          </div>
+
+          <div className="guide-card tone-success">
+            <h3>AI返信案に適した例</h3>
+            <ul>
+              <li><strong>お礼への返信</strong>：助言へのお礼。短い相槌で十分</li>
+              <li><strong>マーケ相談</strong>：公開前の相談に、事前登録ページやX発信など具体的な助言</li>
+              <li><strong>相談の続き</strong>：Steamのウィッシュリストのコツを簡潔に回答</li>
+            </ul>
+          </div>
+
+          <div className="guide-card tone-danger">
+            <h3>不適切な例と安全チェック</h3>
+            <p>
+              <strong>事故の実例：</strong>AIが「LPの初稿と合わせて形をお送りします」と成果物の提出を勝手に約束した。
+            </p>
+            <p>
+              <strong>対策：</strong>返信案に成果物の約束・日時・金額・外部URLが含まれていないかを検査し、違反時は一度だけ書き直し、それでも違反する場合は担当者の確認に回します。
+            </p>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <div className="app-shell">
+      <header className="topbar">
+        <div className="brand">
+          <div className="brand-mark">
+            <Send size={16} />
+          </div>
+          <div>
+            <h1>アウトリーチ返信管理</h1>
+            <div className="brand-sub">分類・確認・返信案の作成</div>
+          </div>
+        </div>
+
+        <nav className="topbar-center">
+          <button className={`tab-btn ${activeTab === "inbox" ? "active" : ""}`} onClick={() => setActiveTab("inbox")}>
             <Inbox size={15} />
-            受信箱・振り分け
+            受信箱
           </button>
           <button
             className={`tab-btn ${activeTab === "metrics" ? "active" : ""}`}
@@ -600,1204 +1678,152 @@ export default function App() {
             }}
           >
             <BarChart3 size={15} />
-            5日間の検証・ベンチマーク
+            検証・計測
           </button>
-          <button
-            className={`tab-btn ${activeTab === "criteria" ? "active" : ""}`}
-            onClick={() => setActiveTab("criteria")}
-          >
+          <button className={`tab-btn ${activeTab === "criteria" ? "active" : ""}`} onClick={() => setActiveTab("criteria")}>
             <BookOpen size={15} />
-            判定基準・ルールガイド
+            判定基準
           </button>
-        </div>
+        </nav>
 
-        {/* Status Notification Banner */}
-        {notification && (
-          <div
-            style={{
-              background: "#e6f4ea",
-              color: "#137333",
-              padding: "6px 14px",
-              borderRadius: "6px",
-              fontSize: "13px",
-              fontWeight: 500,
-              boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
-            }}
-          >
-            {notification}
-          </div>
-        )}
-
-        {/* Topbar Actions */}
         <div className="topbar-right">
-          <button
-            className="secondary-button"
-            title="受信メッセージをシミュレーション"
-            onClick={() => setShowSimulateModal(true)}
-          >
-            <PlusCircle size={15} />
+          <div className="menu-wrap">
+            <button className="btn btn-ghost" onClick={() => setShowDataMenu((v) => !v)} aria-expanded={showDataMenu}>
+              <Database size={15} />
+              データ
+              <ChevronDown size={14} />
+            </button>
+            {showDataMenu && (
+              <>
+                <div className="menu-backdrop" onClick={() => setShowDataMenu(false)} />
+                <div className="menu">
+                  <label className="menu-item" title="JSONデータをインポート">
+                    <Upload size={14} />
+                    JSONをインポート
+                    <input type="file" accept=".json,application/json" onChange={handleImportJson} hidden />
+                  </label>
+                  <a className="menu-item" href="/api/export" download="outreach-threads.json" onClick={() => setShowDataMenu(false)}>
+                    <Download size={14} />
+                    JSONをエクスポート
+                  </a>
+                  <a className="menu-item" href="/api/export/csv" download="outreach-threads.csv" onClick={() => setShowDataMenu(false)}>
+                    <Download size={14} />
+                    CSVをエクスポート
+                  </a>
+                  <div className="menu-divider" />
+                  <button className="menu-item" onClick={handleResetSamples} title="サンプル会話を復元">
+                    <RotateCcw size={14} />
+                    サンプルを復元
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          <button className="btn btn-primary" onClick={() => setShowSimulateModal(true)} title="受信メッセージを追加">
+            <Plus size={15} />
             受信メッセージを追加
           </button>
 
-          <label className="secondary-button import-button" title="JSONデータをインポート">
-            <Upload size={15} />
-            JSONをインポート
-            <input type="file" accept=".json,application/json" onChange={handleImportJson} hidden />
-          </label>
-
-          <a
-            href="/api/export"
-            download="outreach-threads.json"
-            className="secondary-button"
-            style={{ textDecoration: "none", color: "inherit", display: "flex", alignItems: "center", gap: "6px" }}
-            title="JSON形式でエクスポート"
-          >
-            <Download size={15} />
-            JSONをエクスポート
-          </a>
-
-          <a
-            href="/api/export/csv"
-            download="outreach-threads.csv"
-            className="secondary-button"
-            style={{ textDecoration: "none", color: "inherit", display: "flex", alignItems: "center", gap: "6px" }}
-            title="CSV形式でエクスポート"
-          >
-            <Download size={15} />
-            Export CSV
-          </a>
-
-          <div className="status-dot" title="担当者による確認・承認が必要です" />
-          <span style={{ fontSize: "12px", color: "#64748b" }}>担当者による確認が有効</span>
+          <div className="review-indicator" title="送信は行いません。すべて担当者の承認が必要です">
+            <UserRound size={14} />
+            承認制
+          </div>
         </div>
       </header>
 
-      {/* VIEW 1: INBOX & TRIAGE */}
-      {activeTab === "inbox" && (
-        loading ? (
-          <div style={{ display: "grid", placeItems: "center", height: "calc(100vh - 78px)", color: "#64748b" }}>
-            会話を読み込み中...
-          </div>
-        ) : error ? (
-          <div style={{ padding: "40px", textAlign: "center", color: "#dc2626" }}>
-            会話の読み込みに失敗しました：{error}
-          </div>
-        ) : (
-          <main className="workspace">
-          {/* SIDEBAR */}
-          <aside className="sidebar">
-            <div className="sidebar-heading">
-              <div>
-                <h2>受信箱</h2>
-                <span>
-                  {threads.length}件中 {filteredThreads.length}件を表示
-                </span>
-              </div>
-              <div style={{ display: "flex", gap: "6px" }}>
-                <button
-                  className="secondary-button"
-                  style={{ padding: "4px 8px", fontSize: "11px" }}
-                  onClick={handleBatchTriage}
-                  title="未処理の会話をルールとAIで振り分け"
-                >
-                  <RefreshCw size={12} />
-                  すべてを振り分け
-                </button>
-                <button
-                  className="secondary-button"
-                  style={{ padding: "4px 8px", fontSize: "11px" }}
-                  onClick={handleResetSamples}
-                  title="ベンチマーク用のサンプル会話を復元"
-                >
-                  <RotateCcw size={12} />
-                  サンプル復元
-                </button>
-              </div>
-            </div>
+      {activeTab === "inbox" && renderInbox()}
+      {activeTab === "metrics" && renderMetrics()}
+      {activeTab === "criteria" && renderGuide()}
 
-            {/* Search */}
-            <div className="search-box">
-              <Search size={16} />
-              <input
-                placeholder="連絡先・メッセージ・メモを検索..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-
-            {/* Channel filter pills */}
-            <div style={{ padding: "0 18px 10px", display: "flex", gap: "5px", alignItems: "center" }}>
-              <span style={{ fontSize: "11px", color: "#64748b", fontWeight: 600 }}>チャネル:</span>
-              {CHANNELS.map((ch) => (
-                <button
-                  key={ch}
-                  className={`filter ${channelFilter.toLowerCase() === ch.toLowerCase() ? "active" : ""}`}
-                  onClick={() => setChannelFilter(ch)}
-                  style={{ padding: "3px 8px", textTransform: "capitalize" }}
-                >
-                  {ch === "All" ? "すべて" : ch === "x" ? "X（旧Twitter）" : ch === "linkedin" ? "LinkedIn" : "メール"}
-                </button>
-              ))}
-            </div>
-
-            {/* Status filters */}
-            <div className="filters">
-              {STATUS_FILTERS.map((s) => (
-                <button
-                  key={s}
-                  className={`filter ${filter === s ? "active" : ""}`}
-                  onClick={() => setFilter(s)}
-                >
-                  {getStatusLabel(s)}
-                </button>
-              ))}
-            </div>
-
-            {/* Thread list */}
-            <div className="thread-list">
-              {filteredThreads.length === 0 ? (
-                <div style={{ padding: "32px 20px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>
-                  選択した条件に一致する会話はありません。
-                </div>
-              ) : (
-                filteredThreads.map((thread) => {
-                  const lastMsg = thread.messages[thread.messages.length - 1];
-                  return (
-                    <button
-                      key={thread.id}
-                      className={`thread-card ${selectedId === thread.id ? "selected" : ""}`}
-                      onClick={() => setSelectedId(thread.id)}
-                    >
-                      <div className="thread-top">
-                        <strong style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                          {thread.name}
-                          <span className={`channel-pill ${thread.channel.toLowerCase()}`}>
-                            {thread.channel}
-                          </span>
-                        </strong>
-                        <span>{lastMsg?.time?.slice(11, 16) || ""}</span>
-                      </div>
-
-                      <div className="thread-meta">
-                        <span className={`action-pill ${thread.action}`}>
-                          {getActionLabel(thread.action)}
-                        </span>
-                        <span>{thread.category}</span>
-                      </div>
-
-                      <p>{lastMsg?.text || "（メッセージ本文なし）"}</p>
-
-                      <div className="thread-bottom">
-                        <span className={`badge ${getStatusClass(thread.status)}`}>
-                          {getStatusLabel(thread.status)}
-                        </span>
-                        <ChevronRight size={14} />
-                      </div>
-                    </button>
-                  );
-                })
-              )}
-            </div>
-          </aside>
-
-          {/* MAIN CONVERSATION WORKSPACE */}
-          {selectedThread ? (
-            <section className="conversation">
-              {/* Header */}
-              <div className="conversation-header">
-                <div className="person">
-                  <div className="person-avatar">
-                    <User size={18} />
-                  </div>
-                  <div>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <h2>{selectedThread.name}</h2>
-                      <span className={`channel-pill ${selectedThread.channel.toLowerCase()}`}>
-                        {selectedThread.channel} ({selectedThread.account})
-                      </span>
-                    </div>
-                    <p>
-                      {selectedThread.handle}
-                      {selectedThread.profileUrl && ` · ${selectedThread.profileUrl}`}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Right controls: Stopwatch & Status badge */}
-                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                  <div className="timer-box" title="この返信の確認にかかった時間">
-                    <Timer size={14} color="#0284c7" />
-                    <span>経過時間: {formatDuration(stopwatchSeconds)}</span>
-                    <button
-                      onClick={() => setStopwatchActive(!stopwatchActive)}
-                      style={{ border: 0, background: "transparent", padding: 0, color: "#64748b", cursor: "pointer" }}
-                      title={stopwatchActive ? "タイマーを一時停止" : "タイマーを再開"}
-                    >
-                      {stopwatchActive ? <Pause size={12} /> : <Play size={12} />}
-                    </button>
-                  </div>
-
-                  <span className={`badge ${getStatusClass(selectedThread.status)}`}>
-                    {getStatusLabel(selectedThread.status)}
-                  </span>
-                </div>
-              </div>
-
-              {/* Context / Internal Memo Box */}
-              <div style={{ padding: "0 32px 14px", background: "#fff", borderBottom: "1px solid #e4e8ed" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <span style={{ fontSize: "11px", fontWeight: 700, color: "#64748b" }}>
-                    内部情報・メモ
-                  </span>
-                  {!editingMemo && (
-                    <button
-                      className="secondary-button"
-                      style={{ padding: "2px 8px", fontSize: "11px" }}
-                      onClick={() => {
-                        setMemoDraft(selectedThread.memo);
-                        setEditingMemo(true);
-                      }}
-                    >
-                      <Pencil size={11} />
-                      メモを編集
-                    </button>
-                  )}
-                </div>
-
-                {editingMemo ? (
-                  <div style={{ marginTop: "6px", display: "flex", gap: "8px" }}>
-                    <input
-                      style={{
-                        flex: 1,
-                        padding: "6px 10px",
-                        border: "1px solid #cbd5e1",
-                        borderRadius: "6px",
-                        fontSize: "12px",
-                      }}
-                      placeholder="連絡先の背景や会話のメモを入力..."
-                      value={memoDraft}
-                      onChange={(e) => setMemoDraft(e.target.value)}
-                    />
-                    <button className="primary-button" style={{ padding: "6px 12px", fontSize: "12px" }} onClick={handleSaveMemo}>
-                      <Check size={12} />
-                      保存
-                    </button>
-                    <button className="secondary-button" style={{ padding: "6px 10px", fontSize: "12px" }} onClick={() => setEditingMemo(false)}>
-                      キャンセル
-                    </button>
-                  </div>
-                ) : (
-                  <div className="contact-memo-box">
-                    {selectedThread.memo || "内部メモはありません。「メモを編集」から背景情報を記録できます。"}
-                  </div>
-                )}
-              </div>
-
-              {/* Conversation Messages & Decision Panel */}
-              <div className="conversation-body">
-                {/* Left: Chat history */}
-                <div className="messages">
-                  <div className="section-label">会話履歴</div>
-
-                  {selectedThread.messages.map((message, idx) => (
-                    <div key={idx} className={message.fromMe ? "message mine" : "message received"}>
-                      <div className="message-author">{message.fromMe ? "自分" : selectedThread.name}</div>
-                      <div className="message-bubble">{message.text}</div>
-                      <div className="message-time">{message.time?.slice(11, 16) || message.time}</div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Right: AI Decision & Human Review Panel */}
-                <div className="right-panel">
-                  {/* CARD 1: CLASSIFICATION */}
-                  <div className="panel">
-                    <div className="panel-header">
-                      <div>
-                        <div className="section-label">AI処理フロー</div>
-                        <h3>分類結果</h3>
-                      </div>
-                      <Sparkles size={18} color="#7c3aed" />
-                    </div>
-
-                    {editingClassification ? (
-                      /* Classification Edit Form */
-                      <div style={{ marginTop: "12px" }}>
-                        <div className="reason">
-                          <span>対応方針</span>
-                          <select
-                            className="draft-editor"
-                            style={{ minHeight: "auto", height: "36px", padding: "4px 8px" }}
-                            value={classificationDraft.action}
-                            onChange={(e) =>
-                              setClassificationDraft((prev) => ({ ...prev, action: e.target.value }))
-                            }
-                          >
-                            {CLASSIFICATION_ACTIONS.map((opt) => (
-                              <option key={opt.value} value={opt.value}>
-                                {opt.label}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div className="reason" style={{ marginTop: "8px" }}>
-                          <span>分類カテゴリ</span>
-                          <select
-                            className="draft-editor"
-                            style={{ minHeight: "auto", height: "36px", padding: "4px 8px" }}
-                            value={classificationDraft.category}
-                            onChange={(e) =>
-                              setClassificationDraft((prev) => ({ ...prev, category: e.target.value }))
-                            }
-                          >
-                            {CLASSIFICATION_CATEGORIES.map((cat) => (
-                              <option key={cat} value={cat}>
-                                {cat}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div className="reason" style={{ marginTop: "8px" }}>
-                          <span>理由</span>
-                          <textarea
-                            className="draft-editor"
-                            style={{ minHeight: "70px" }}
-                            value={classificationDraft.reason}
-                            onChange={(e) =>
-                              setClassificationDraft((prev) => ({ ...prev, reason: e.target.value }))
-                            }
-                            placeholder="分類理由を入力..."
-                          />
-                        </div>
-
-                        <div className="draft-actions">
-                          <button className="secondary-button" onClick={() => setEditingClassification(false)}>
-                            キャンセル
-                          </button>
-                          <button className="primary-button" onClick={handleSaveClassification}>
-                            <Check size={14} />
-                            保存 Override
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      /* Classification Summary */
-                      <>
-                        <div className="classification">
-                          <span>対応方針</span>
-                          <strong className={`action-${selectedThread.action}`}>
-                            {selectedThread.action === "auto"
-                              ? "AI返信案を作成"
-                              : selectedThread.action === "escalate"
-                              ? "担当者による確認"
-                              : selectedThread.action === "skip"
-                              ? "返信不要"
-                              : "未分類"}
-                          </strong>
-                        </div>
-
-                        <div className="classification">
-                          <span>分類カテゴリ</span>
-                          <strong>{selectedThread.category}</strong>
-                        </div>
-
-                        <div className="reason">
-                          <span>理由・判断根拠</span>
-                          <p>{selectedThread.reason}</p>
-                        </div>
-
-                        {selectedThread.ruleHit && (
-                          <div className="reason">
-                            <span>適用された機械ルール</span>
-                            <p style={{ color: "#b45309", fontWeight: 600 }}>{selectedThread.ruleHit}</p>
-                          </div>
-                        )}
-
-                        <div className="reason">
-                          <span>判断元</span>
-                          <p>
-                            {selectedThread.decidedBy === "rule"
-                              ? "機械ルール（正規表現フィルター）"
-                              : selectedThread.decidedBy === "llm"
-                              ? "生成AI（Gemini）"
-                              : selectedThread.decidedBy === "human"
-                              ? "担当者による手動修正"
-                              : "振り分け処理"}
-                          </p>
-                        </div>
-
-                        {selectedThread.status !== "Completed" && (
-                          <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
-                            <button
-                              className="secondary-button full"
-                              onClick={() => {
-                                setClassificationDraft({
-                                  action: selectedThread.action,
-                                  category: selectedThread.category,
-                                  reason: selectedThread.reason,
-                                });
-                                setEditingClassification(true);
-                              }}
-                            >
-                              <Pencil size={14} />
-                              分類を修正
-                            </button>
-
-                            <button
-                              className="secondary-button"
-                              title="機械ルールとAIで再振り分け"
-                              disabled={isTriaging}
-                              onClick={handleRerunTriage}
-                            >
-                              <RefreshCw size={14} className={isTriaging ? "animate-spin" : ""} />
-                              {isTriaging ? "振り分け中..." : "再振り分け"}
-                            </button>
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>
-
-                  {/* CARD 2: SAFETY CONTENT GATE */}
-                  {selectedThread.gate && selectedThread.gate !== "-" && (
-                    <div
-                      className={`gate-box ${
-                        selectedThread.gate.includes("合格") ? "passed" : "warning"
-                      }`}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", gap: "6px", fontWeight: 700 }}>
-                        {selectedThread.gate.includes("合格") ? (
-                          <ShieldCheck size={16} />
-                        ) : (
-                          <ShieldAlert size={16} />
-                        )}
-                        <span>内容の安全チェック：{selectedThread.gate}</span>
-                      </div>
-                      <span style={{ fontSize: "11px" }}>
-                        {selectedThread.gate.includes("合格")
-                          ? "✓ 不適切な納品約束、日程の確約、料金提示、無効なリンクがないことを確認しました。"
-                          : "⚠️ 返信案に約束や条件が含まれる可能性があります。担当者が必ず確認してください。"}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* CARD 3: REPLY DRAFT & WORKFLOW ACTIONS */}
-                  {selectedThread.status === "Completed" ? (
-                    <div className="panel completion-panel">
-                      <div className="completion-icon"><Check size={22} /></div>
-                      <h3>対応完了</h3>
-                      <p>この会話は完了として記録されました。外部サービスへのメッセージ送信は行っていません。</p>
-                    </div>
-                  ) : selectedThread.action === "skip" ? (
-                    <div className="panel empty-draft">
-                      <Clock3 size={24} />
-                      <h3>返信不要</h3>
-                      <p>
-                        この会話は返信不要と判定されました
-                        （例：スパム、一斉広告、外部サービスのリンクのみ）
-                      </p>
-                      <div style={{ marginTop: "16px", display: "flex", justifyContent: "center", gap: "8px" }}>
-                        <button
-                          className="secondary-button"
-                          onClick={() => {
-                            setClassificationDraft({
-                              action: "auto",
-                              category: "カジュアルな質問",
-                              reason: "担当者が返信不要の判定を変更しました",
-                            });
-                            setEditingClassification(true);
-                          }}
-                        >
-                          <Pencil size={14} />
-                          返信が必要に変更
-                        </button>
-                        <button className="primary-button" onClick={() => performAction("complete")}>
-                          <Check size={14} />
-                          返信不要として完了
-                        </button>
-                      </div>
-                    </div>
-                  ) : selectedThread.action === "escalate" ? (
-                    <div className="panel escalation-panel">
-                      <div className="panel-header">
-                        <div>
-                          <div className="section-label">担当者による確認が必要</div>
-                          <h3>担当者の判断が必要です</h3>
-                        </div>
-                        <User size={18} color="#b45309" />
-                      </div>
-
-                      <div className="escalation-message">
-                        <strong>この会話は安全のため自動返信を停止しています。</strong>
-                        <p>
-                          理由：{selectedThread.reason}。ルールまたはAIが次の内容を検出しました：
-                          個別条件、日程、料金、または人間関係に関わる内容。
-                        </p>
-                      </div>
-
-                      {/* Manual Response Composer */}
-                      <div style={{ marginTop: "14px" }}>
-                        <div className="section-label">担当者が返信を作成</div>
-                        <textarea
-                          className="draft-editor"
-                          style={{ minHeight: "90px" }}
-                          placeholder="返信文を入力するか、下のテンプレートを選択..."
-                          value={draftEditText}
-                          onChange={(e) => setDraftEditText(e.target.value)}
-                        />
-
-                        {/* Quick escalation templates */}
-                        <div style={{ marginTop: "8px", display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                          <button
-                            className="filter"
-                            style={{ fontSize: "10px" }}
-                            onClick={() =>
-                              setDraftEditText(
-                                "ご連絡ありがとうございます！日程の候補を確認いたしました。◯月◯日◯時でお願いいたします。当日はよろしくお願いいたします。"
-                              )
-                            }
-                          >
-                            + 日程を承諾
-                          </button>
-                          <button
-                            className="filter"
-                            style={{ fontSize: "10px" }}
-                            onClick={() =>
-                              setDraftEditText(
-                                "ご提案ありがとうございます。大変魅力的なお話ですが、現時点では体制の都合上一旦見送りとさせていただけますと幸いです。また機会がありましたらよろしくお願いいたします。"
-                              )
-                            }
-                          >
-                            + 丁寧にお断り
-                          </button>
-                          <button
-                            className="filter"
-                            style={{ fontSize: "10px" }}
-                            onClick={() =>
-                              setDraftEditText(
-                                "詳細な条件を教えてくださりありがとうございます。社内で確認の上、改めて明日中に折り返しご連絡いたします。"
-                              )
-                            }
-                          >
-                            + 条件を確認
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="draft-actions workflow-secondary-actions" style={{ marginTop: "14px" }}>
-                        <button className="secondary-button" onClick={() => performAction("hold")}>
-                          <Clock3 size={14} />
-                          保留にする
-                        </button>
-                        <button className="secondary-button" onClick={() => performAction("return")}>
-                          <RotateCcw size={14} />
-                          修正のため差し戻す
-                        </button>
-                        {selectedThread.status === "On hold" && (
-                          <button className="secondary-button" onClick={() => performAction("complete")}>
-                            <Check size={14} />
-                            保留から完了にする
-                          </button>
-                        )}
-                        <button
-                          className="primary-button"
-                          disabled={!draftEditText.trim()}
-                          onClick={() => performAction("approve", { draft: draftEditText })}
-                        >
-                          <Send size={14} />
-                          承認して対応完了にする
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    /* AUTO DRAFT WORKFLOW */
-                    <div className="panel draft-panel">
-                      <div className="panel-header">
-                        <div>
-                          <div className="section-label">AI返信案</div>
-                          <h3>返信案</h3>
-                        </div>
-                        <FileText size={18} color="#2563eb" />
-                      </div>
-
-                      {/* Tone & Prompt Guidance Controls */}
-                      <div
-                        style={{
-                          marginTop: "10px",
-                          padding: "10px 12px",
-                          background: "#f8fafc",
-                          borderRadius: "8px",
-                          border: "1px solid #e2e8f0",
-                        }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                          <span style={{ fontSize: "11px", fontWeight: 700, color: "#64748b" }}>
-                            文体・再生成
-                          </span>
-                          <select
-                            className="tone-select"
-                            value={customTone}
-                            onChange={(e) => setCustomTone(e.target.value)}
-                          >
-                            <option value="warm">親しみやすく丁寧</option>
-                            <option value="professional">フォーマル・ビジネス向け</option>
-                            <option value="concise">簡潔・直接的</option>
-                            <option value="consultative">相談・アドバイス調</option>
-                          </select>
-                        </div>
-
-                        <div style={{ marginTop: "8px", display: "flex", gap: "6px" }}>
-                          <input
-                            style={{
-                              flex: 1,
-                              padding: "5px 8px",
-                              border: "1px solid #cbd5e1",
-                              borderRadius: "6px",
-                              fontSize: "12px",
-                            }}
-                            placeholder="追加指示（例：ガイドへのリンクに言及）..."
-                            value={customGuidance}
-                            onChange={(e) => setCustomGuidance(e.target.value)}
-                          />
-                          <button
-                            className="secondary-button"
-                            style={{ padding: "4px 10px", fontSize: "11px" }}
-                            disabled={isRegenerating}
-                            onClick={handleRegenerateDraft}
-                          >
-                            <RefreshCw size={12} className={isRegenerating ? "animate-spin" : ""} />
-                            {isRegenerating ? "生成中..." : "返信案を再生成"}
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Draft Content / Editor */}
-                      {editingDraft ? (
-                        <div style={{ marginTop: "12px" }}>
-                          <div className="section-label">返信内容を編集中</div>
-                          <textarea
-                            className="draft-editor"
-                            value={draftEditText}
-                            onChange={(e) => setDraftEditText(e.target.value)}
-                          />
-                        </div>
-                      ) : (
-                        <div className="draft-content">
-                          {selectedThread.draft || "返信案はまだ生成されていません。下のボタンから生成してください。"}
-                        </div>
-                      )}
-
-                      {/* Actions */}
-                      <div className="draft-actions">
-                        {editingDraft ? (
-                          <>
-                            <button className="secondary-button" onClick={() => setEditingDraft(false)}>
-                              キャンセル
-                            </button>
-                            <button className="secondary-button" onClick={handleSaveDraftEdit}>
-                              編集内容を保存
-                            </button>
-                          </>
-                        ) : (
-                          <button
-                            className="secondary-button"
-                            onClick={() => {
-                              setDraftEditText(selectedThread.draft);
-                              setEditingDraft(true);
-                            }}
-                          >
-                            <Pencil size={14} />
-                            返信案を編集
-                          </button>
-                        )}
-
-                        <button
-                          className="primary-button"
-                          disabled={!String(editingDraft ? draftEditText : selectedThread.draft).trim()}
-                          onClick={handleApprove}
-                        >
-                          <Check size={14} />
-                          承認して対応完了にする
-                        </button>
-                      </div>
-
-                      <div className="workflow-secondary-actions">
-                        <button className="hold-button" onClick={() => performAction("return")}>
-                          <RotateCcw size={13} />
-                          修正のため差し戻す
-                        </button>
-                        <button className="hold-button" onClick={() => performAction("hold")}>
-                          <Pause size={13} />
-                          保留にする
-                        </button>
-                        {selectedThread.status === "On hold" && (
-                          <button className="hold-button" onClick={() => performAction("complete")}>
-                            <Check size={13} />
-                            保留から完了にする
-                          </button>
-                        )}
-                      </div>
-
-                      {/* 5-Day Validation Feedback Rating */}
-                      <div
-                        style={{
-                          marginTop: "16px",
-                          paddingTop: "12px",
-                          borderTop: "1px dashed #e2e8f0",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                        }}
-                      >
-                        <span style={{ fontSize: "11px", color: "#64748b", fontWeight: 600 }}>
-                          返信案の評価（5日間の検証用）：
-                        </span>
-                        <div style={{ display: "flex", gap: "6px" }}>
-                          <button
-                            className={`filter ${selectedThread.qualityRating === "helpful" ? "active" : ""}`}
-                            style={{ padding: "4px 8px", fontSize: "11px" }}
-                            onClick={() => handleRateDraft("helpful")}
-                            title="そのまま使用、または軽微な修正で使用可能"
-                          >
-                            <ThumbsUp size={12} /> 良好
-                          </button>
-                          <button
-                            className={`filter ${selectedThread.qualityRating === "minor_edit" ? "active" : ""}`}
-                            style={{ padding: "4px 8px", fontSize: "11px" }}
-                            onClick={() => handleRateDraft("minor_edit")}
-                            title="手動編集が必要"
-                          >
-                            <Pencil size={12} /> 編集あり
-                          </button>
-                          <button
-                            className={`filter ${selectedThread.qualityRating === "poor" ? "active" : ""}`}
-                            style={{ padding: "4px 8px", fontSize: "11px" }}
-                            onClick={() => handleRateDraft("poor")}
-                            title="品質が低い、または事実と異なる内容"
-                          >
-                            <ThumbsDown size={12} /> 要修正
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </section>
-          ) : (
-            <div style={{ display: "grid", placeItems: "center", height: "100%", color: "#94a3b8" }}>
-              会話を選択すると詳細が表示されます。
-            </div>
-          )}
-        </main>
-        )
+      {notification && (
+        <div className="toast" role="status">
+          <Check size={15} />
+          <span>{notification}</span>
+        </div>
       )}
 
-      {/* VIEW 2: 5-DAY VALIDATION & BENCHMARK DASHBOARD */}
-      {activeTab === "metrics" && (
-        <section className="metrics-view">
-          <div style={{ marginBottom: "20px" }}>
-            <h2>5日間のMVP検証ダッシュボード</h2>
-            <p style={{ color: "#64748b", fontSize: "14px", marginTop: "4px" }}>
-              返信対応時間、判断作業の削減、ベンチマークとの比較を記録します。
-              21日間の手作業基準値（251件）と比較します。
-            </p>
-          </div>
-
-          {metrics && (
-            <>
-              {/* Stat Cards */}
-              <div className="metrics-hero">
-                <div className="stat-card">
-                  <div className="label">判断対象の合計</div>
-                  <div className="value">{metrics.total}</div>
-                  <div className="sub">システム内の会話数</div>
-                </div>
-
-                <div className="stat-card">
-                  <div className="label">平均対応時間</div>
-                  <div className="value" style={{ color: "#0284c7" }}>
-                    {metrics.handlingTime.averageSecondsPerMsg == null ? "未計測" : formatDuration(metrics.handlingTime.averageSecondsPerMsg)}
-                  </div>
-                  <div className="sub">実測値を記録すると平均時間が表示されます。</div>
-                </div>
-
-                <div className="stat-card">
-                  <div className="label">推定削減時間</div>
-                  <div className="value" style={{ color: "#16a34a" }}>
-                    {metrics.handlingTime.estimatedTimeSavedMinutes == null ? "—" : `${metrics.handlingTime.estimatedTimeSavedMinutes} 分`}
-                  </div>
-                  <div className="sub">推定値。実測時間を記録して検証してください。</div>
-                </div>
-
-                <div className="stat-card">
-                  <div className="label">返信案の評価</div>
-                  <div className="value" style={{ color: "#7c3aed" }}>
-                    {metrics.ratings.totalRatings > 0
-                      ? `${Math.round(
-                          ((metrics.ratings.helpful + metrics.ratings.minorEdit) /
-                            metrics.ratings.totalRatings) *
-                            100
-                        )}%`
-                      : "—"}
-                  </div>
-                  <div className="sub">{metrics.ratings.totalRatings} 件の評価を収集</div>
-                </div>
-              </div>
-
-              {/* Benchmark Comparison Table */}
-              <div className="comparison-box">
-                <h3 style={{ margin: "0 0 6px", fontSize: "16px" }}>
-                  ワークフロー分布：MVPと21日間の手作業基準の比較
-                </h3>
-                <p style={{ margin: 0, fontSize: "13px", color: "#64748b" }}>
-                  参考比較値：アウトリーチ分類251件・21日間。現在のMVPの実測結果とは区別してください。
-                </p>
-
-                <table className="comparison-table">
-                  <thead>
-                    <tr>
-                      <th>ワークフローの判断区分</th>
-                      <th>21日間の基準値（251件）</th>
-                      <th>現在のMVPでの分布</th>
-                      <th>目標・効果</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td>
-                        <strong>AI返信案を作成（自動）</strong>
-                        <div style={{ fontSize: "11px", color: "#64748b" }}>
-                          一般的な助言、お礼、簡単な相談
-                        </div>
-                      </td>
-                      <td>
-                        <span style={{ fontWeight: 700, color: "#1e293b" }}>30%</span> （75件）
-                      </td>
-                      <td>
-                        <span style={{ fontWeight: 700, color: "#16a34a" }}>
-                          {metrics.currentRates.autoRatePercent}%
-                        </span>{" "}
-                        （{metrics.counts.auto}件）
-                      </td>
-                      <td>
-                        <span style={{ color: "#16a34a", fontWeight: 600 }}>
-                          参考値：手作業約5分、支援利用時約45秒（実測値ではありません）
-                        </span>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>
-                        <strong>担当者の判断が必要（要確認）</strong>
-                        <div style={{ fontSize: "11px", color: "#64748b" }}>
-                          日程、料金、契約、苦情
-                        </div>
-                      </td>
-                      <td>
-                        <span style={{ fontWeight: 700, color: "#1e293b" }}>49%</span> （123件）
-                      </td>
-                      <td>
-                        <span style={{ fontWeight: 700, color: "#d97706" }}>
-                          {metrics.currentRates.escalateRatePercent}%
-                        </span>{" "}
-                        （{metrics.counts.escalate}件）
-                      </td>
-                      <td>
-                        <span style={{ color: "#d97706", fontWeight: 600 }}>
-                          AIに判断させず安全に担当者へ引き継ぎ
-                        </span>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>
-                        <strong>返信不要（スキップ）</strong>
-                        <div style={{ fontSize: "11px", color: "#64748b" }}>
-                          一斉広告、リンクのみのDM、対応終了
-                        </div>
-                      </td>
-                      <td>
-                        <span style={{ fontWeight: 700, color: "#1e293b" }}>21%</span> （53件）
-                      </td>
-                      <td>
-                        <span style={{ fontWeight: 700, color: "#475569" }}>
-                          {metrics.currentRates.skipRatePercent}%
-                        </span>{" "}
-                        （{metrics.counts.skip}件）
-                      </td>
-                      <td>
-                        <span style={{ color: "#475569", fontWeight: 600 }}>
-                          返信文の作成は不要
-                        </span>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-
-              {/* ステータス内訳 & Draft Ratings */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
-                <div className="comparison-box" style={{ margin: 0 }}>
-                  <h3 style={{ margin: "0 0 12px", fontSize: "15px" }}>ステータス内訳</h3>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "10px", fontSize: "13px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>完了・対応済み：</span>
-                      <strong>{metrics.statusCounts.completed}</strong>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>返信案を生成（承認待ち）：</span>
-                      <strong>{metrics.statusCounts.draftGenerated}</strong>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>確認が必要・エスカレーション：</span>
-                      <strong>{metrics.statusCounts.needsReview}</strong>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>保留：</span>
-                      <strong>{metrics.statusCounts.onHold}</strong>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>修正差し戻し：</span>
-                      <strong>{metrics.statusCounts.returned}</strong>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="comparison-box" style={{ margin: 0 }}>
-                  <h3 style={{ margin: "0 0 12px", fontSize: "15px" }}>AI返信案への担当者フィードバック</h3>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "10px", fontSize: "13px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>👍 良好（そのまま使用・軽微な修正）</span>
-                      <strong style={{ color: "#16a34a" }}>{metrics.ratings.helpful}</strong>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>✏️ 大幅な手動修正が必要</span>
-                      <strong style={{ color: "#d97706" }}>{metrics.ratings.minorEdit}</strong>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>👎 品質が低い・事実と異なる内容</span>
-                      <strong style={{ color: "#dc2626" }}>{metrics.ratings.poor}</strong>
-                    </div>
-                  </div>
-                  <div style={{ marginTop: "16px", paddingTop: "12px", borderTop: "1px solid #f1f5f9" }}>
-                    <a
-                      href="/api/export"
-                      download="outreach-threads.json"
-                      className="primary-button"
-                      style={{ textDecoration: "none", display: "inline-flex", width: "100%", justifyContent: "center" }}
-                    >
-                      <Download size={15} />
-                      検証レポートをJSONで出力
-                    </a>
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-        </section>
-      )}
-
-      {/* VIEW 3: CRITERIA & RULES GUIDE */}
-      {activeTab === "criteria" && (
-        <section className="guide-view">
-          <div style={{ marginBottom: "20px" }}>
-            <h2>判定基準・振り分けルール</h2>
-            <p style={{ color: "#64748b", fontSize: "14px", marginTop: "4px" }}>
-              クライアント提供の判定基準、良い例・悪い例、および安全上の注意点に基づくガイドです。
-               
-            </p>
-          </div>
-
-          <div className="guide-card">
-            <h3>処理の原則：機械ルール → AI → 内容の安全チェック</h3>
-            <p>
-              このシステムはAIの返信をそのまま出力しません。まず機械ルールで重要なリスクを検出し、
-              AIで文脈を判断した後、生成された返信案に安全チェックを適用します。
-               
-            </p>
-          </div>
-
-          <div className="guide-card">
-            <h3 style={{ color: "#b45309" }}>1. 担当者確認が必須のルール（例外なし）</h3>
-            <p>該当した場合はAI返信案を作成せず、担当者の確認に回します。</p>
-            <ul style={{ fontSize: "13px", lineHeight: "1.8", color: "#334155", marginTop: "8px" }}>
-              <li>
-                <strong>日程・MTGの日時:</strong> "9/14（月）13〜17時", "打診", "zoom", "meet".
-                (例: 相手D)
-              </li>
-              <li>
-                <strong>金額・条件・契約:</strong> "◯万円", "成果報酬", "固定額", "請求", "契約".
-                (例: 相手E)
-              </li>
-              <li>
-                <strong>実績の数字を聞かれている:</strong> "DL数", "ダウンロード数", "売上", "月商".
-                (例: 相手F)
-              </li>
-              <li>
-                <strong>断り・クレーム・こじれ:</strong> "見送らせてください", "苦情", "迷惑".
-                (例: 相手G)
-              </li>
-              <li>
-                <strong>知り合い・元同僚からの連絡:</strong> "お久しぶり", "元同僚".
-                (※「同期設計」等の技術用語除外ガード付き)
-              </li>
-            </ul>
-          </div>
-
-          <div className="guide-card">
-            <h3 style={{ color: "#475569" }}>2. 返信不要と判定するルール</h3>
-            <ul style={{ fontSize: "13px", lineHeight: "1.8", color: "#334155", marginTop: "8px" }}>
-              <li>
-                <strong>業者の一斉営業:</strong> 罫線（━━━━）、▼登録はこちら、初月無料、キャンペーン定型.
-                (例: 相手I)
-              </li>
-              <li>
-                <strong>他サービスへの誘導だけ:</strong> 本文なしでLINEや外部URLのみのDM.
-                (例: 相手J)
-              </li>
-            </ul>
-          </div>
-
-          <div className="guide-card">
-            <h3 style={{ color: "#16a34a" }}>3. AI返信案の作成に適した例</h3>
-            <ul style={{ fontSize: "13px", lineHeight: "1.8", color: "#334155", marginTop: "8px" }}>
-              <li>
-                <strong>相手A (お礼への返信):</strong> 助言への感謝のみで日程・金額なし。相槌で十分。
-              </li>
-              <li>
-                <strong>相手B (マーケ相談):</strong>
-                ゲーム公開前の相談。具体的なアドバイス（事前登録ページ、X発信）を自動生成。
-              </li>
-              <li>
-                <strong>相手C (相談の続き):</strong> Steam版ウィッシュリストのコツを簡潔に回答。
-              </li>
-            </ul>
-          </div>
-
-          <div className="guide-card" style={{ borderLeft: "4px solid #dc2626" }}>
-            <h3 style={{ color: "#dc2626" }}>4. 不適切な例と安全チェック（相手K）</h3>
-            <p>
-              <strong>事故の実例:</strong> LLMが「LPの初稿と合わせて形をお送りします」と
-              <strong>成果物の提出を勝手に約束</strong>してしまった。
-            </p>
-            <p style={{ marginTop: "6px" }}>
-              <strong>対策 (文面ゲート):</strong>{" "}
-              AIドラフト生成後に「成果物の約束」「勝手な日時」「勝手な金額」「外部URL」が含まれていないかを自動検査し、違反時はオペレーターの目視確認に強制エスカレーションします。
-            </p>
-          </div>
-
-          <div className="guide-card" style={{ borderLeft: "4px solid #d97706" }}>
-            <h3 style={{ color: "#d97706" }}>5. 誤分類の境界ケース（相手H）</h3>
-            <p>
-              <strong>正規表現の誤爆:</strong> 「同期設計」という技術用語に「同期」ルールが反応し誤ってエスカレートしてしまった。
-              本MVPのルールエンジンは技術用語ガード（「同期設計」「非同期」）を組み込み、安全性を保ちつつ手数を削減します。
-            </p>
-          </div>
-        </section>
-      )}
-
-      {/* MODAL: SIMULATE INCOMING REPLY */}
       {showSimulateModal && (
         <div className="modal-overlay" onClick={() => setShowSimulateModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-              <h3 style={{ margin: 0, fontSize: "18px" }}>受信メッセージを追加</h3>
-              <button
-                className="secondary-button"
-                style={{ padding: "4px 8px" }}
-                onClick={() => setShowSimulateModal(false)}
-              >
-                ✕
+            <div className="modal-head">
+              <h3>受信メッセージを追加</h3>
+              <button className="icon-button" onClick={() => setShowSimulateModal(false)} aria-label="閉じる">
+                <X size={16} />
               </button>
             </div>
 
-            <form onSubmit={handleCreateSimulatedReply}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
-                <div>
-                  <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#64748b", marginBottom: "4px" }}>
-                    連絡先名
-                  </label>
+            <form onSubmit={handleCreateSimulatedReply} className="form-stack">
+              <div className="form-grid">
+                <label className="field">
+                  <span>連絡先名</span>
                   <input
-                    style={{ width: "100%", padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "13px" }}
-                    placeholder="例：相手M（ゲームスタジオ）"
+                    className="input"
+                    placeholder="例：相手M"
                     value={newSimMsg.contactName}
                     onChange={(e) => setNewSimMsg({ ...newSimMsg, contactName: e.target.value })}
                   />
-                </div>
-                <div>
-                  <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#64748b", marginBottom: "4px" }}>
-                    ハンドル名・ユーザー名
-                  </label>
+                </label>
+                <label className="field">
+                  <span>ハンドル名</span>
                   <input
-                    style={{ width: "100%", padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "13px" }}
+                    className="input"
                     placeholder="例：@userM"
                     value={newSimMsg.handle}
                     onChange={(e) => setNewSimMsg({ ...newSimMsg, handle: e.target.value })}
                   />
-                </div>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
-                <div>
-                  <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#64748b", marginBottom: "4px" }}>
-                    連絡チャネル
-                  </label>
+                </label>
+                <label className="field">
+                  <span>チャネル</span>
                   <select
-                    style={{ width: "100%", padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "13px" }}
+                    className="input"
                     value={newSimMsg.platform}
                     onChange={(e) => setNewSimMsg({ ...newSimMsg, platform: e.target.value })}
                   >
-                    <option value="x">X（旧Twitter）</option>
+                    <option value="x">X</option>
                     <option value="linkedin">LinkedIn</option>
                     <option value="email">メール</option>
                   </select>
-                </div>
-                <div>
-                  <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#64748b", marginBottom: "4px" }}>
-                    使用アカウント
-                  </label>
+                </label>
+                <label className="field">
+                  <span>使用アカウント</span>
                   <input
-                    style={{ width: "100%", padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "13px" }}
-                    placeholder="例：Lily / アウトリーチ担当"
+                    className="input"
+                    placeholder="例：アウトリーチ担当"
                     value={newSimMsg.account}
                     onChange={(e) => setNewSimMsg({ ...newSimMsg, account: e.target.value })}
                   />
-                </div>
+                </label>
               </div>
 
-              <div style={{ marginBottom: "12px" }}>
-                <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#64748b", marginBottom: "4px" }}>
-                  内部情報・メモ (OPTIONAL)
-                </label>
+              <label className="field">
+                <span>メモ（任意）</span>
                 <input
-                  style={{ width: "100%", padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "13px" }}
-                  placeholder="例：初回の相談DM。受託の打診が進行中"
+                  className="input"
+                  placeholder="例：初回の相談DM"
                   value={newSimMsg.memo}
                   onChange={(e) => setNewSimMsg({ ...newSimMsg, memo: e.target.value })}
                 />
-              </div>
+              </label>
 
-              <div style={{ marginBottom: "16px" }}>
-                <label style={{ display: "block", fontSize: "11px", fontWeight: 700, color: "#64748b", marginBottom: "4px" }}>
-                  メッセージ本文（必須）
-                </label>
+              <label className="field">
+                <span>メッセージ本文</span>
                 <textarea
-                  style={{ width: "100%", minHeight: "100px", padding: "10px", border: "1px solid #cbd5e1", borderRadius: "6px", fontSize: "13px" }}
-                  placeholder="受信したメッセージを貼り付けるか入力..."
+                  className="input textarea tall"
+                  placeholder="受信したメッセージを貼り付け"
                   required
                   value={newSimMsg.messageText}
                   onChange={(e) => setNewSimMsg({ ...newSimMsg, messageText: e.target.value })}
                 />
-              </div>
+              </label>
 
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-                <button type="button" className="secondary-button" onClick={() => setShowSimulateModal(false)}>
+              <div className="button-row end">
+                <button type="button" className="btn btn-ghost" onClick={() => setShowSimulateModal(false)}>
                   キャンセル
                 </button>
-                <button type="submit" className="primary-button">
+                <button type="submit" className="btn btn-primary">
                   <ArrowRight size={14} />
-                  AI処理を実行して追加
+                  振り分けて追加
                 </button>
               </div>
             </form>
